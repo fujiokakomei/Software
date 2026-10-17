@@ -35,6 +35,9 @@ private:
 
     uint16_t distance_data[12] = {0};
 
+    // 上部VL53の横壁との距離から、直進時の旋回補正量を求める。
+    float wallFollowingOperation() const;
+
 public:
     rescuekits::RescueKitManager& _rightKits;
     rescuekits::RescueKitManager& _leftKits;

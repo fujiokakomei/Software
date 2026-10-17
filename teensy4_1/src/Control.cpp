@@ -31,6 +31,14 @@ constexpr float frontWallThreshold = 156.0f;
 constexpr float backWallThreshold = 147.0f;
 constexpr float rightWallThreshold = 151.7f;
 constexpr float leftWallThreshold = 151.7f;
+// 上部VL53は機体中心から半径28 mmの円周上に、30度間隔で配置されている。
+constexpr float kUpperVl53RadiusMm = 28.0f;
+constexpr float kCorridorWidthMm = 280.0f;
+constexpr float kTargetSideWallDistanceMm = kCorridorWidthMm / 2.0f;
+constexpr float kWallFollowingKp = 0.35f;
+constexpr float kMaxWallFollowingOperation = 45.0f;
+// 斜めのVL53が、真横のVL53と同じ横壁を見ていると判断する許容差。
+constexpr float kSideWallConsistencyMm = 35.0f;
 constexpr unsigned long kTurnTimeoutMs = 5000;
 // 被災者識別・救助キット投下中の停止時間も含むため、通常の一マス走行より長く取る。
 constexpr unsigned long kMoveTimeoutMs = 15000;
@@ -55,6 +63,52 @@ float normalizeAngle(float angle)
 int clampMotorSpeed(float speed)
 {
     return constrain(static_cast<int>(speed), 0, 255);
+}
+
+bool isValidSideWallReading(uint16_t distance)
+{
+    // 0は通信開始前の初期値として使われるため、壁の測距値として扱わない。
+    return distance > 0;
+}
+
+float sideWallDistanceFromCenter(uint16_t rangeMm, uint8_t sensorIndex)
+{
+    // センサーiは前方から時計回りにi * 30度。測距値を機体中心から壁までの
+    // 横方向の距離へ投影する。センサー自体が中心から28 mm離れている分も加算する。
+    const float angle = static_cast<float>(sensorIndex) * PI / 6.0f;
+    return (static_cast<float>(rangeMm) + kUpperVl53RadiusMm) * fabsf(sinf(angle));
+}
+
+float averageSideWallDistance(
+    const uint16_t distanceData[12],
+    uint8_t directSideSensor,
+    const uint8_t* angledSideSensors,
+    size_t angledSensorCount)
+{
+    const float directDistance = sideWallDistanceFromCenter(
+        distanceData[directSideSensor], directSideSensor);
+    float totalDistance = directDistance;
+    size_t sampleCount = 1;
+
+    for (size_t i = 0; i < angledSensorCount; ++i)
+    {
+        const uint8_t sensorIndex = angledSideSensors[i];
+        const uint16_t rangeMm = distanceData[sensorIndex];
+        if (!isValidSideWallReading(rangeMm))
+        {
+            continue;
+        }
+
+        const float sideDistance = sideWallDistanceFromCenter(rangeMm, sensorIndex);
+        // 通路端の前後壁など、別の壁を見ている斜めセンサーは除外する。
+        if (fabsf(sideDistance - directDistance) <= kSideWallConsistencyMm)
+        {
+            totalDistance += sideDistance;
+            ++sampleCount;
+        }
+    }
+
+    return totalDistance / static_cast<float>(sampleCount);
 }
 
 void blinkRescueKitLed(rescuekits::RescueKitManager& kits, int count)
@@ -212,6 +266,55 @@ float ControlRobot::PID(float target_yaw)
     return KP * error + KI * _pidIntegral + KD * derivative;
 }
 
+float ControlRobot::wallFollowingOperation() const
+{
+    constexpr uint8_t kRightAngledSideSensors[] = {1, 2};
+    // 4, 5番は右後方のセンサーなので、壁追従には使用しない。
+    constexpr uint8_t kLeftAngledSideSensors[] = {7, 8, 10, 11};
+
+    const bool hasRightWall = isValidSideWallReading(distance_data[3])
+        && distance_data[3] < rightWallThreshold;
+    const bool hasLeftWall = isValidSideWallReading(distance_data[9])
+        && distance_data[9] < leftWallThreshold;
+
+    if (!hasRightWall && !hasLeftWall)
+    {
+        return 0.0f;
+    }
+
+    const float rightDistance = hasRightWall
+        ? averageSideWallDistance(
+            distance_data, 3, kRightAngledSideSensors,
+            sizeof(kRightAngledSideSensors) / sizeof(kRightAngledSideSensors[0]))
+        : 0.0f;
+    const float leftDistance = hasLeftWall
+        ? averageSideWallDistance(
+            distance_data, 9, kLeftAngledSideSensors,
+            sizeof(kLeftAngledSideSensors) / sizeof(kLeftAngledSideSensors[0]))
+        : 0.0f;
+
+    float distanceError = 0.0f;
+    if (hasRightWall && hasLeftWall)
+    {
+        // 右へ寄ると右壁との距離は短く、左壁との距離は長くなる。
+        distanceError = (leftDistance - rightDistance) / 2.0f;
+    }
+    else if (hasRightWall)
+    {
+        distanceError = kTargetSideWallDistanceMm - rightDistance;
+    }
+    else
+    {
+        distanceError = leftDistance - kTargetSideWallDistanceMm;
+    }
+
+    // 正の補正量は右車輪を速くして左へ向ける、既存のジャイロPIDと同じ符号。
+    return constrain(
+        kWallFollowingKp * distanceError,
+        -kMaxWallFollowingOperation,
+        kMaxWallFollowingOperation);
+}
+
 bool ControlRobot::deployRescueKits(int q, String way)
 {
     blinkRescueKitLed(_rightKits, q); // Unharmedでも光らせる
@@ -359,7 +462,7 @@ int ControlRobot::moveForwardOneBlock(
             return kMotionTimeoutResult;
         }
 
-        const float operation = PID(start_yaw);
+        const float operation = PID(start_yaw) + wallFollowingOperation();
         const int leftSpeed = clampMotorSpeed(speed - operation);
         const int rightSpeed = clampMotorSpeed(speed + operation);
 
