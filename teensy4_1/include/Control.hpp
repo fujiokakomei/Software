@@ -59,6 +59,10 @@ public:
     _leftKits(leftKits) {}
 
 
+    float convertSensorValue(uint16_t distanceMm, int sensorIndex); //斜めとかをsinで90度の時の角度に変換
+    int isWall(); // 左右に壁があるか
+    float wallFollowingOperation();
+
     float PID(float target_yaw);
     // タイムアウトまたは通信待ちタイムアウト時は-1を返す。
     int moveForwardOneBlock(int speed, float start_yaw,

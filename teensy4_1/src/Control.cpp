@@ -38,6 +38,17 @@ constexpr unsigned long kSlopeTimeoutMs = 10000;
 constexpr unsigned long kGyroCorrectionTimeoutMs = 5000;
 constexpr unsigned long kCameraResponseTimeoutMs = 3000;
 constexpr int kMotionTimeoutResult = -1;
+// 上部VL53PID
+constexpr float kUpperVL53RadiusMm = 28.0f; //センサーが置かれてる円の半径
+constexpr float kWallFollowingRightThresholdMm = 131.7f;
+constexpr float kWallFollowingLeftThresholdMm = 131.7f;
+constexpr float kSideWallConsistencyMm = 35.0f; //斜め前センサーだけ壁なくなって変な値読んでないか判定
+constexpr float kWallFollowingKp = 0.5f;
+constexpr float kMaxWallFollowingOperation = 40.0f;
+constexpr int DR_SENSOR = 2;
+constexpr int R_SENSOR = 3;
+constexpr int DL_SENSOR = 10;
+constexpr int L_SENSOR = 9;
 
 float normalizeAngle(float angle)
 {
@@ -139,6 +150,65 @@ SerialWaitResult waitForSerialWithStartButton(
 
 } // namespace
 
+int ControlRobot::isWall()
+{
+    if (distance_data[R_SENSOR] < kWallFollowingRightThresholdMm &&
+        distance_data[L_SENSOR] < kWallFollowingLeftThresholdMm)
+    {
+        if (fabsf(distance_data[DR_SENSOR] - distance_data[R_SENSOR]) < kSideWallConsistencyMm && fabsf(distance_data[DL_SENSOR] - distance_data[L_SENSOR]) < kSideWallConsistencyMm)
+        {
+            return 3;
+        }
+    }
+    else if (distance_data[R_SENSOR] < kWallFollowingRightThresholdMm)
+    {
+        if (fabsf(distance_data[DR_SENSOR] - distance_data[R_SENSOR]) < kSideWallConsistencyMm)
+        {
+            return 1;
+        }
+    }
+    else if (distance_data[L_SENSOR] < kWallFollowingLeftThresholdMm)
+    {
+        if (fabsf(distance_data[DL_SENSOR] - distance_data[L_SENSOR]) < kSideWallConsistencyMm)
+        {
+            return 2;
+        }
+    }
+    return 0;
+}
+
+float ControlRobot::convertSensorValue(uint16_t distanceMm, int sensorIndex)
+{
+    const float angle = static_cast<float>(sensorIndex) * PI / 6.0f;
+    return (static_cast<float>(distanceMm) + kUpperVL53RadiusMm) * fabsf(sinf(angle));
+}
+
+float ControlRobot::wallFollowingOperation()
+{
+    const int wall = isWall();
+    float operation = 0.0f;
+
+    if (wall == 1 || wall == 3)
+    {
+        // 右斜め前の補正距離が右横より大きいときは、右を向くように補正する。
+        const float rightDiagonal = convertSensorValue(distance_data[DR_SENSOR], DR_SENSOR);
+        const float rightSide = convertSensorValue(distance_data[R_SENSOR], R_SENSOR);
+        operation += rightDiagonal - rightSide;
+    }
+
+    if (wall == 2 || wall == 3)
+    {
+        // 左斜め前の補正距離が左横より大きいときは、左を向くように補正する。
+        const float leftDiagonal = convertSensorValue(distance_data[DL_SENSOR], DL_SENSOR);
+        const float leftSide = convertSensorValue(distance_data[L_SENSOR], L_SENSOR);
+        operation -= leftDiagonal - leftSide;
+    }
+
+    return constrain(
+        operation * kWallFollowingKp,
+        -kMaxWallFollowingOperation,
+        kMaxWallFollowingOperation);
+}
 
 
 bool ControlRobot::turnDegrees(float degree)
@@ -359,7 +429,7 @@ int ControlRobot::moveForwardOneBlock(
             return kMotionTimeoutResult;
         }
 
-        const float operation = PID(start_yaw);
+        const float operation = PID(start_yaw) + wallFollowingOperation();
         const int leftSpeed = clampMotorSpeed(speed - operation);
         const int rightSpeed = clampMotorSpeed(speed + operation);
 
