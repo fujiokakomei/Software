@@ -3,8 +3,10 @@
 
 #include <Arduino.h>
 
-#define SENSOR_COUNT 12
-#define PCA9555_ADDR 0x20 // PCA9555のI2Cアドレス（設定に合わせて変更してください）
+constexpr uint8_t SENSOR_COUNT = 12;
+constexpr uint8_t PCA9555_ADDR = 0x20; // PCA9555のI2Cアドレス（設定に合わせて変更してください）
+constexpr uint8_t FRAME_HEADER[] = {'V', 'L'};
+constexpr size_t PAYLOAD_SIZE = SENSOR_COUNT * sizeof(uint16_t);
 
 // VL53L0Xオブジェクトの配列
 Adafruit_VL53L0X lox[SENSOR_COUNT];
@@ -34,6 +36,33 @@ void initPCA9555() {
     Wire.write(0x00); // すべて出力設定 (Port 0)
     Wire.write(0x00); // すべて出力設定 (Port 1)
     Wire.endTransmission();
+}
+
+uint8_t crc8(const uint8_t *data, size_t len)
+{
+    uint8_t crc = 0x00;
+    for (size_t i = 0; i < len; i++)
+    {
+        crc ^= data[i];
+        for (uint8_t b = 0; b < 8; b++)
+            crc = (crc & 0x80) ? (crc << 1) ^ 0x07 : (crc << 1);
+    }
+    return crc;
+}
+
+void sendDistanceFrame()
+{
+    // フレーム形式: 'V', 'L', 距離データ(12個 x 16 bit, little endian), CRC-8
+    uint8_t payload[PAYLOAD_SIZE];
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i)
+    {
+        payload[i * 2] = static_cast<uint8_t>(distance_data[i] & 0xFF);
+        payload[i * 2 + 1] = static_cast<uint8_t>(distance_data[i] >> 8);
+    }
+
+    Serial1.write(FRAME_HEADER, sizeof(FRAME_HEADER));
+    Serial1.write(payload, sizeof(payload));
+    Serial1.write(crc8(payload, sizeof(payload)));
 }
 
 void setup() {
@@ -94,13 +123,8 @@ void loop() {
         }
     }
 
-    // 別のマイコンへデータをシリアル送信 (パケット構造の作成)
-    // ヘッダー
-    Serial1.write(0xAA);
-    Serial1.write(0xBB);
-
-    // 配列のバイナリデータをそのまま送信 (12個 * 2バイト = 24バイト)
-    Serial1.write((uint8_t*)distance_data, sizeof(distance_data));
+    // 別のマイコンへ距離データをフレーム化して送信
+    sendDistanceFrame();
 
     // デバッグ用にUSBシリアルにも表示
     for (int i = 0; i < SENSOR_COUNT; i++) {
