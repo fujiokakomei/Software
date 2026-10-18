@@ -316,6 +316,21 @@ bool moveForward()
         mazeMapper.markBlack(robotPose.floor, searchResult.nextX, searchResult.nextY);
         break;
 
+    case controlrobot::ControlRobot::kMoveResultObstacleNextTile:
+        // 回避後も、開始位置から次のタイル中心で停止している。
+        robotPose.floor = searchResult.nextFloor;
+        robotPose.x = searchResult.nextX;
+        robotPose.y = searchResult.nextY;
+        robotPose.dir = searchResult.absoluteDirection;
+        break;
+
+    case controlrobot::ControlRobot::kMoveResultObstacleSecondNextTile:
+        // ControlRobot 側で中間タイルの壁情報は記録済み。座標も物理位置に合わせる。
+        mazeMapper.moveForward(robotPose.x, robotPose.y, searchResult.absoluteDirection, 2);
+        robotPose.floor = searchResult.nextFloor;
+        robotPose.dir = searchResult.absoluteDirection;
+        break;
+
     default:
         break;
     }
@@ -558,6 +573,7 @@ void loop()
         }
 
         bool returnInterrupted = false;
+        bool returnPathNeedsReplan = false;
         size_t i = 0;
         while (i + 1 < returnCoordinate.size() && !returnInterrupted)
         {
@@ -632,10 +648,21 @@ void loop()
             searchResult.nextIsSlope = false;
             searchResult.absoluteDirection = targetDirection;
             returnInterrupted = !moveForward();
+            if (!returnInterrupted &&
+                moveResult == controlrobot::ControlRobot::kMoveResultObstacleSecondNextTile)
+            {
+                // 予定経路の1マス先まで進んだので、現在位置から帰還経路を作り直す。
+                returnPathNeedsReplan = true;
+                break;
+            }
             ++i;
         }
 
         if (returnInterrupted)
+        {
+            break;
+        }
+        if (returnPathNeedsReplan)
         {
             break;
         }

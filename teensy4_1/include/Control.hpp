@@ -68,7 +68,7 @@ public:
     int moveForwardOneBlock(int speed, float start_yaw,
         const rcj_maze::FloorPosition& startPosition,
         const rcj_maze::FloorPosition& goalPosition,
-        rcj_maze::MazeMapper& mazeMapper); // 0:前進成功、1:前進成功＆チェックポイント、2:青、3:赤、4:黒（障害物回避などを追加予定）
+        rcj_maze::MazeMapper& mazeMapper); // 0:前進成功、1:チェックポイント、2:青、3:赤、4:黒、5:障害物回避後に次のタイル、6:障害物回避後に次の次のタイル
     bool deployRescueKits(int q, String way);
 
     bool turnDegrees(float degree); // -180 ~ 180、LoPで中断したらfalse
@@ -78,7 +78,8 @@ public:
     void moveArc(int speed, float angularVelocity);
 
     void avoidObstacleControl(String way);
-    void avoidObstacle();
+    // 0: 回避なし、1: 次のタイル中心へ復帰、2: 次の次のタイル中心へ復帰
+    int avoidObstacle(float movedDistanceMm);
     /*
     Fusionでシミュレーションしたらこんな感じ↓
     1. 20mm後退
@@ -101,11 +102,37 @@ public:
 
     bool correctGyroYaw(int nowDir); // 後ろ下がって壁に機体押し付けて無理やりジャイロのyawのドリフトとかいうやつを修正する
 
+    // 障害物回避後の移動結果。通常の結果(0〜4)と重複しない値を使う。
+    static constexpr int kMoveResultObstacleNextTile = 5;
+    static constexpr int kMoveResultObstacleSecondNextTile = 6;
+
 private:
+    // 前方距離センサーの値を基準に、指定したタイル中心まで前進する。
+    bool moveForwardToFrontDistance(int speed, float targetDistanceMm, float targetYaw);
+    void beginIntermediateTileWallRecording(
+        float targetDistanceMm,
+        float targetYaw,
+        const rcj_maze::FloorPosition& startPosition,
+        const rcj_maze::FloorPosition& intermediatePosition,
+        rcj_maze::MazeMapper& mazeMapper);
+    void recordIntermediateTileWallIfReached();
+    void clearIntermediateTileWallRecording();
+
     float _arcPreviousYaw = 0.0f;
     float _arcRateIntegral = 0.0f;
     unsigned long _arcPreviousTimeMs = 0;
     bool _arcRateControlInitialized = false;
+
+    bool _intermediateTileWallRecordingEnabled = false;
+    bool _intermediateTileWallRecorded = false;
+    float _intermediateTileTargetDistanceMm = 0.0f;
+    float _intermediateTileTargetYaw = 0.0f;
+    float _followingTileDistanceMm = 300.0f;
+    int _intermediateTileFloor = 0;
+    int _intermediateTileX = 0;
+    int _intermediateTileY = 0;
+    int _intermediateTileDirection = 0;
+    rcj_maze::MazeMapper* _intermediateTileMapper = nullptr;
 
 };
 } // namespace ControlRobot

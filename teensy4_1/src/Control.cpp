@@ -9,6 +9,7 @@
 #include "upperVL53.hpp"
 #include "Mapping.hpp"
 
+#include <array>
 #include <math.h>
 
 namespace controlrobot
@@ -51,10 +52,18 @@ constexpr int DL_SENSOR = 10;
 constexpr int L_SENSOR = 9;
 // 左右障害物検知距離閾値&回避用定数とか
 constexpr float kObstacleThresholdMm = 120.0f;
-constexpr float kLowerVlDifferenceMm = 50.0f;
 constexpr float kTurningAngle = 20.0f;
 constexpr int kMovingSpeed = 50;
 constexpr int kMovingMs = 1000; //ミリ秒
+constexpr float kObstacleSecondTileThresholdMm = 60.0f; //これ以上進んでたら2マス前方に復帰する
+constexpr float kWalledTileDistanceMm = 280.0f;
+constexpr float kCenteringToleranceMm = 5.0f;
+
+// タイル中心での壁判定値。
+constexpr float kMapFrontWallThresholdMm = 136.0f;
+constexpr float kMapBackWallThresholdMm = 127.0f;
+constexpr float kMapRightWallThresholdMm = 131.7f;
+constexpr float kMapLeftWallThresholdMm = 131.7f;
 
 // 弧走行の角速度フィードバック用。実機で必要に応じて調整する。
 constexpr float kArcRateKp = 0.35f;
@@ -109,6 +118,51 @@ bool isRightWay(String way)
 int availableKitCount(const rescuekits::RescueKitManager& kits)
 {
     return max(0, kits.remainingKits);
+}
+
+std::array<bool, 4> wallInformationAtTileCenter(const uint16_t distanceData[12])
+{
+    // 上部VL53は 0:前、3:右、6:後、9:左。
+    return {
+        distanceData[0] < kMapFrontWallThresholdMm,
+        distanceData[3] < kMapRightWallThresholdMm,
+        distanceData[6] < kMapBackWallThresholdMm,
+        distanceData[9] < kMapLeftWallThresholdMm};
+}
+
+bool directionFromPositions(
+    const rcj_maze::FloorPosition& from,
+    const rcj_maze::FloorPosition& to,
+    rcj_maze::Direction& direction)
+{
+    if (from.floor != to.floor)
+    {
+        return false;
+    }
+
+    const int deltaX = to.x - from.x;
+    const int deltaY = to.y - from.y;
+    if (deltaX == 1 && deltaY == 0)
+    {
+        direction = rcj_maze::EAST;
+        return true;
+    }
+    if (deltaX == -1 && deltaY == 0)
+    {
+        direction = rcj_maze::WEST;
+        return true;
+    }
+    if (deltaX == 0 && deltaY == 1)
+    {
+        direction = rcj_maze::NORTH;
+        return true;
+    }
+    if (deltaX == 0 && deltaY == -1)
+    {
+        direction = rcj_maze::SOUTH;
+        return true;
+    }
+    return false;
 }
 
 //===========================================================================================================================
@@ -424,6 +478,7 @@ bool ControlRobot::moveForwardMm(int speed, int range, float start_yaw)
 
         _vl53s.getVL53s(distance_data);
         nowDistance = distance_data[0];
+        recordIntermediateTileWallIfReached();
     }
     _motors.stopRobot();
     return true;
@@ -462,6 +517,103 @@ bool ControlRobot::moveBackwardMm(int speed, int range, float start_yaw)
     return true;
 }
 
+void ControlRobot::beginIntermediateTileWallRecording(
+    float targetDistanceMm,
+    float targetYaw,
+    const rcj_maze::FloorPosition& startPosition,
+    const rcj_maze::FloorPosition& intermediatePosition,
+    rcj_maze::MazeMapper& mazeMapper)
+{
+    _intermediateTileWallRecordingEnabled = false;
+    _intermediateTileWallRecorded = false;
+    _intermediateTileMapper = nullptr;
+
+    rcj_maze::Direction direction;
+    if (!directionFromPositions(startPosition, intermediatePosition, direction))
+    {
+        return;
+    }
+
+    _intermediateTileTargetDistanceMm = targetDistanceMm;
+    _intermediateTileTargetYaw = targetYaw;
+    _intermediateTileFloor = intermediatePosition.floor;
+    _intermediateTileX = intermediatePosition.x;
+    _intermediateTileY = intermediatePosition.y;
+    _intermediateTileDirection = static_cast<int>(direction);
+    _intermediateTileMapper = &mazeMapper;
+    _intermediateTileWallRecordingEnabled = true;
+}
+
+void ControlRobot::recordIntermediateTileWallIfReached()
+{
+    if (!_intermediateTileWallRecordingEnabled || _intermediateTileWallRecorded)
+    {
+        return;
+    }
+
+    _vl53s.getVL53s(distance_data);
+    const float yawErrorRad = normalizeAngle(_sensors.readYaw() - _intermediateTileTargetYaw)
+        * PI / 180.0f;
+    const float forwardDistanceMm = distance_data[0] * cosf(yawErrorRad);
+    if (forwardDistanceMm > _intermediateTileTargetDistanceMm + kCenteringToleranceMm)
+    {
+        return;
+    }
+
+    const std::array<bool, 4> walls = wallInformationAtTileCenter(distance_data);
+    _intermediateTileMapper->updateMap(
+        _intermediateTileFloor,
+        _intermediateTileX,
+        _intermediateTileY,
+        static_cast<rcj_maze::Direction>(_intermediateTileDirection),
+        walls);
+    _followingTileDistanceMm = walls[1] && walls[3]
+        ? kWalledTileDistanceMm
+        : kTileDistanceMm;
+    _intermediateTileWallRecorded = true;
+}
+
+void ControlRobot::clearIntermediateTileWallRecording()
+{
+    _intermediateTileWallRecordingEnabled = false;
+    _intermediateTileWallRecorded = false;
+    _intermediateTileMapper = nullptr;
+}
+
+bool ControlRobot::moveForwardToFrontDistance(int speed, float targetDistanceMm, float targetYaw)
+{
+    _vl53s.getVL53s(distance_data);
+    float nowDistanceMm = distance_data[0];
+    const unsigned long startTime = millis();
+
+    while (nowDistanceMm > targetDistanceMm + kCenteringToleranceMm)
+    {
+        if (stopIfStartButtonInterrupted(_motors))
+        {
+            return false;
+        }
+        if (millis() - startTime >= kMoveTimeoutMs)
+        {
+            _motors.stopRobot();
+            return false;
+        }
+
+        const float operation = PID(targetYaw);
+        const int leftSpeed = clampMotorSpeed(speed - operation);
+        const int rightSpeed = clampMotorSpeed(speed + operation);
+
+        _motors.moveLeftSide(leftSpeed);
+        _motors.moveRightSide(rightSpeed);
+
+        _vl53s.getVL53s(distance_data);
+        nowDistanceMm = distance_data[0];
+        recordIntermediateTileWallIfReached();
+    }
+
+    _motors.stopRobot();
+    return true;
+}
+
 
 void ControlRobot::avoidObstacleControl(String way)
 {
@@ -482,6 +634,7 @@ void ControlRobot::avoidObstacleControl(String way)
     while ((now_time - start_time) <= kMovingMs)
     {
         moveArc(kMovingSpeed, turningAngle);
+        recordIntermediateTileWallIfReached();
         now_time = millis();
     }
     moveForwardMm(kMovingSpeed, 100, _sensors.readYaw()); //10cm前進
@@ -490,12 +643,14 @@ void ControlRobot::avoidObstacleControl(String way)
     while ((now_time - start_time) <= kMovingMs)
     {
         moveArc(kMovingSpeed, turningAngle);
+        recordIntermediateTileWallIfReached();
         now_time = millis();
     }
     turnDegrees(-turningAngle); // ここで道の中央には戻った
+    recordIntermediateTileWallIfReached();
 }
 
-void ControlRobot::avoidObstacle()
+int ControlRobot::avoidObstacle(float movedDistanceMm)
 {
     bool isAvoided = false;
     // 距離センサー1,11
@@ -513,35 +668,40 @@ void ControlRobot::avoidObstacle()
     {
         // 0番VL53故障確定　どーにかせい
     }
-
-
-    // ロードセルの方、こっち使った時点でほぼ確実に距離センサー故障してるか変な置かれ方してる
-    int obstacles = ControlRobot::_loadCells.readLoadCell();
-    switch (obstacles)
+    // 距離センサーで回避できた場合は、ロードセルによる回避を重ねて実行しない。
+    if (!isAvoided)
     {
-    case 0: // なし
-        break;
-    case 1: // 右
-        moveBackwardMm(kMovingSpeed, 300, _sensors.readYaw());
-        avoidObstacleControl("right");
-        isAvoided = true;
-        break;
-    case 2: // 左
-        moveBackwardMm(kMovingSpeed, 300, _sensors.readYaw());
-        avoidObstacleControl("left");
-        isAvoided = true;
-        break;
-    case 3: // 距離センサーが故障してるので頑張りましょう！！！！！！！！！（泣）
-        //実装予定
-        break;
-    default:
-        break;
+        // ロードセルの方。ここを使うのは、距離センサー故障または例外的な置かれ方を想定する。
+        const int obstacles = _loadCells.readLoadCell();
+        switch (obstacles)
+        {
+        case 0: // なし
+            break;
+        case 1: // 右
+            moveBackwardMm(kMovingSpeed, 300, _sensors.readYaw());
+            avoidObstacleControl("right");
+            isAvoided = true;
+            break;
+        case 2: // 左
+            moveBackwardMm(kMovingSpeed, 300, _sensors.readYaw());
+            avoidObstacleControl("left");
+            isAvoided = true;
+            break;
+        case 3: // 距離センサーが故障してるので頑張りましょう！！！！！！！！！（泣）
+            //実装予定
+            break;
+        default:
+            break;
+        }
     }
 
     if (isAvoided) // 中央には戻ってるからあとは前進か後退で適切なタイルの中央にいく
     {
-
+        // ちょうど60 mmは「6 cm以上」として次の次のタイルを選ぶ。
+        return movedDistanceMm >= kObstacleSecondTileThresholdMm ? 2 : 1;
     }
+
+    return 0;
 }
 
 int ControlRobot::moveForwardOneBlock(
@@ -704,8 +864,74 @@ int ControlRobot::moveForwardOneBlock(
             }
         }
 
-        //ロードセル、距離センサー1,11
-        ControlRobot::avoidObstacle();
+        // ロードセル、距離センサー1,11
+        // 回避開始前の壁情報を使い、最初のタイル間隔を決める。
+        const std::array<bool, 4> wallsBeforeAvoid = wallInformationAtTileCenter(distance_data);
+        const float movedDistanceMm = max(0.0f, startDistance - nowDistance);
+        const float firstTileDistanceMm = wallsBeforeAvoid[1] && wallsBeforeAvoid[3]
+            ? kWalledTileDistanceMm
+            : kTileDistanceMm;
+        const float intermediateTargetDistanceMm = startDistance - firstTileDistanceMm;
+
+        // 回避中に1つ前方のタイル中心を通過した瞬間の壁情報を記録する。
+        beginIntermediateTileWallRecording(
+            intermediateTargetDistanceMm, start_yaw, startPosition, goalPosition, mazeMapper);
+        const int obstacleTargetTiles = avoidObstacle(movedDistanceMm);
+        if (obstacleTargetTiles == 0)
+        {
+            clearIntermediateTileWallRecording();
+            continue;
+        }
+
+        // 回避後には1つ前方の中心を通過済みの場合がある。機体を後退させず、
+        // まだ前方にある場合だけその中心まで進む。
+        _vl53s.getVL53s(distance_data);
+        nowDistance = distance_data[0];
+        recordIntermediateTileWallIfReached();
+
+        if (obstacleTargetTiles == 1 &&
+            nowDistance > intermediateTargetDistanceMm + kCenteringToleranceMm)
+        {
+            if (!moveForwardToFrontDistance(kMovingSpeed, intermediateTargetDistanceMm, start_yaw))
+            {
+                clearIntermediateTileWallRecording();
+                return kMotionTimeoutResult;
+            }
+            clearIntermediateTileWallRecording();
+            return kMoveResultObstacleNextTile;
+        }
+
+        if (obstacleTargetTiles == 2 &&
+            nowDistance > intermediateTargetDistanceMm + kCenteringToleranceMm)
+        {
+            // 2タイル進む場合も、まだ中間中心より手前なら通過時に壁を記録する。
+            if (!moveForwardToFrontDistance(kMovingSpeed, intermediateTargetDistanceMm, start_yaw))
+            {
+                clearIntermediateTileWallRecording();
+                return kMotionTimeoutResult;
+            }
+            _vl53s.getVL53s(distance_data);
+            nowDistance = distance_data[0];
+            recordIntermediateTileWallIfReached();
+        }
+
+        // 1タイルを指定していても既にその中心を超えた場合は、後退せず次の中心へ進む。
+        // 中間タイルの壁情報を回避中に取得できなかった場合は現在値をフォールバックに使う。
+        if (!_intermediateTileWallRecorded)
+        {
+            _followingTileDistanceMm = isWall() == 3
+                ? kWalledTileDistanceMm
+                : kTileDistanceMm;
+        }
+        const float finalTargetDistanceMm = intermediateTargetDistanceMm - _followingTileDistanceMm;
+        if (!moveForwardToFrontDistance(kMovingSpeed, finalTargetDistanceMm, start_yaw))
+        {
+            clearIntermediateTileWallRecording();
+            return kMotionTimeoutResult;
+        }
+
+        clearIntermediateTileWallRecording();
+        return kMoveResultObstacleSecondNextTile;
     }
     _motors.stopRobot();
     if (detectedCheckpoint)
