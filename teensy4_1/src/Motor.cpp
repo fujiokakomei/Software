@@ -123,9 +123,9 @@ void ControlMotors::moveLeftSide(int speed) // 車体左側のモーター二つ
     else if (speed >= -255)
     {
         analogWrite(m3_1, 0);
-        analogWrite(m3_2, speed);
+        analogWrite(m3_2, -speed);
         analogWrite(m4_1, 0);
-        analogWrite(m4_2, speed);
+        analogWrite(m4_2, -speed);
     }
 }
 
@@ -141,9 +141,9 @@ void ControlMotors::moveRightSide(int speed) // 車体右側のモーター二�
     else if (speed >= -255)
     {
         analogWrite(m1_1, 0);
-        analogWrite(m1_2, speed);
+        analogWrite(m1_2, -speed);
         analogWrite(m2_1, 0);
-        analogWrite(m2_2, speed);
+        analogWrite(m2_2, -speed);
     }
 }
 

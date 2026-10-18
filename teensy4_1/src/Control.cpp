@@ -49,6 +49,18 @@ constexpr int DR_SENSOR = 2;
 constexpr int R_SENSOR = 3;
 constexpr int DL_SENSOR = 10;
 constexpr int L_SENSOR = 9;
+// 左右障害物検知距離閾値&回避用定数とか
+constexpr float kObstacleThresholdMm = 120.0f;
+constexpr float kLowerVlDifferenceMm = 50.0f;
+constexpr float kTurningAngle = 20.0f;
+constexpr int kMovingSpeed = 50;
+constexpr int kMovingMs = 1000; //ミリ秒
+
+// 弧走行の角速度フィードバック用。実機で必要に応じて調整する。
+constexpr float kArcRateKp = 0.35f;
+constexpr float kArcRateKi = 0.03f;
+constexpr float kMaxArcRateIntegral = 300.0f;
+constexpr unsigned long kArcRateResetIntervalMs = 250;
 
 float normalizeAngle(float angle)
 {
@@ -66,6 +78,11 @@ float normalizeAngle(float angle)
 int clampMotorSpeed(float speed)
 {
     return constrain(static_cast<int>(speed), 0, 255);
+}
+
+int clampSignedMotorSpeed(float speed)
+{
+    return constrain(static_cast<int>(roundf(speed)), -255, 255);
 }
 
 void blinkRescueKitLed(rescuekits::RescueKitManager& kits, int count)
@@ -265,6 +282,70 @@ bool ControlRobot::turnDegrees(float degree)
     return true;
 }
 
+void ControlRobot::moveArc(int speed, float angularVelocity)
+{
+    const int baseSpeed = clampSignedMotorSpeed(speed);
+    if (baseSpeed == 0 && angularVelocity == 0.0f)
+    {
+        _motors.stopRobot();
+        _arcRateControlInitialized = false;
+        _arcRateIntegral = 0.0f;
+        return;
+    }
+
+    float yaw = 0.0f;
+    float roll = 0.0f;
+    float pitch = 0.0f;
+    _sensors.readOrientation(yaw, roll, pitch);
+
+    const unsigned long now = millis();
+    float actualAngularVelocity = 0.0f;
+    float deltaTimeSeconds = 0.0f;
+
+    if (_arcRateControlInitialized)
+    {
+        const unsigned long elapsedMs = now - _arcPreviousTimeMs;
+        if (elapsedMs <= kArcRateResetIntervalMs)
+        {
+            deltaTimeSeconds = static_cast<float>(elapsedMs) / 1000.0f;
+            if (deltaTimeSeconds > 0.0f)
+            {
+                actualAngularVelocity = normalizeAngle(yaw - _arcPreviousYaw) / deltaTimeSeconds;
+            }
+        }
+        else
+        {
+            // 呼び出し間隔が空いた場合は古い角速度を使わない。
+            _arcRateIntegral = 0.0f;
+        }
+    }
+    else
+    {
+        _arcRateControlInitialized = true;
+        _arcRateIntegral = 0.0f;
+    }
+
+    const float rateError = angularVelocity - actualAngularVelocity;
+    if (deltaTimeSeconds > 0.0f)
+    {
+        _arcRateIntegral = constrain(
+            _arcRateIntegral + rateError * deltaTimeSeconds,
+            -kMaxArcRateIntegral,
+            kMaxArcRateIntegral);
+    }
+
+    // 左右の速度差で角速度を作る。後退時にも旋回方向が変わらない式にする。
+    const float turnOperation = kArcRateKp * rateError + kArcRateKi * _arcRateIntegral;
+    const int leftSpeed = clampSignedMotorSpeed(static_cast<float>(baseSpeed) - turnOperation);
+    const int rightSpeed = clampSignedMotorSpeed(static_cast<float>(baseSpeed) + turnOperation);
+
+    _motors.moveLeftSide(leftSpeed);
+    _motors.moveRightSide(rightSpeed);
+
+    _arcPreviousYaw = yaw;
+    _arcPreviousTimeMs = now;
+}
+
 float ControlRobot::PID(float target_yaw)
 {
     float yaw = 0.0f;
@@ -381,24 +462,85 @@ bool ControlRobot::moveBackwardMm(int speed, int range, float start_yaw)
     return true;
 }
 
+
+void ControlRobot::avoidObstacleControl(String way)
+{
+    bool wayRight = isRightWay(way);
+    float turningAngle;
+    if (!wayRight)
+    {
+        turningAngle = -kTurningAngle;
+    }
+    else
+    {
+        turningAngle = kTurningAngle;
+    }
+
+    turnDegrees(-turningAngle);
+    unsigned long start_time = millis();
+    unsigned long now_time = start_time;
+    while ((now_time - start_time) <= kMovingMs)
+    {
+        moveArc(kMovingSpeed, turningAngle);
+        now_time = millis();
+    }
+    moveForwardMm(kMovingSpeed, 100, _sensors.readYaw()); //10cm前進
+    start_time = millis();
+    now_time = start_time;
+    while ((now_time - start_time) <= kMovingMs)
+    {
+        moveArc(kMovingSpeed, turningAngle);
+        now_time = millis();
+    }
+    turnDegrees(-turningAngle); // ここで道の中央には戻った
+}
+
 void ControlRobot::avoidObstacle()
 {
+    bool isAvoided = false;
+    // 距離センサー1,11
+    if (distance_data[1] < kObstacleThresholdMm && distance_data[11] > kObstacleThresholdMm)
+    {
+        avoidObstacleControl("right");
+        isAvoided = true;
+    }
+    else if (distance_data[1] > kObstacleThresholdMm && distance_data[11] < kObstacleThresholdMm)
+    {
+        avoidObstacleControl("left");
+        isAvoided = true;
+    }
+    else if (distance_data[1] < kObstacleThresholdMm && distance_data[11] < kObstacleThresholdMm)
+    {
+        // 0番VL53故障確定　どーにかせい
+    }
+
+
+    // ロードセルの方、こっち使った時点でほぼ確実に距離センサー故障してるか変な置かれ方してる
     int obstacles = ControlRobot::_loadCells.readLoadCell();
     switch (obstacles)
     {
     case 0: // なし
         break;
     case 1: // 右
-        //実装予定
+        moveBackwardMm(kMovingSpeed, 300, _sensors.readYaw());
+        avoidObstacleControl("right");
+        isAvoided = true;
         break;
     case 2: // 左
-        //実装予定
+        moveBackwardMm(kMovingSpeed, 300, _sensors.readYaw());
+        avoidObstacleControl("left");
+        isAvoided = true;
         break;
     case 3: // 距離センサーが故障してるので頑張りましょう！！！！！！！！！（泣）
         //実装予定
         break;
     default:
         break;
+    }
+
+    if (isAvoided) // 中央には戻ってるからあとは前進か後退で適切なタイルの中央にいく
+    {
+
     }
 }
 
@@ -562,7 +704,7 @@ int ControlRobot::moveForwardOneBlock(
             }
         }
 
-        //ロードセル
+        //ロードセル、距離センサー1,11
         ControlRobot::avoidObstacle();
     }
     _motors.stopRobot();

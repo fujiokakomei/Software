@@ -72,6 +72,12 @@ public:
     bool deployRescueKits(int q, String way);
 
     bool turnDegrees(float degree); // -180 ~ 180、LoPで中断したらfalse
+
+    // 速度をPWM値(-255〜255)、角速度を度/秒で指定して弧を描く。
+    // 正の角速度は右旋回、負の角速度は左旋回。制御周期ごとに呼び出す。
+    void moveArc(int speed, float angularVelocity);
+
+    void avoidObstacleControl(String way);
     void avoidObstacle();
     /*
     Fusionでシミュレーションしたらこんな感じ↓
@@ -94,6 +100,12 @@ public:
     bool goDownSlope(int speed, float start_yaw); // 下部距離センサーの値が閾値より長かったら下り坂判定
 
     bool correctGyroYaw(int nowDir); // 後ろ下がって壁に機体押し付けて無理やりジャイロのyawのドリフトとかいうやつを修正する
+
+private:
+    float _arcPreviousYaw = 0.0f;
+    float _arcRateIntegral = 0.0f;
+    unsigned long _arcPreviousTimeMs = 0;
+    bool _arcRateControlInitialized = false;
 
 };
 } // namespace ControlRobot
