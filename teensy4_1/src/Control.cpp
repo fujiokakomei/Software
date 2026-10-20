@@ -719,6 +719,8 @@ int ControlRobot::moveForwardOneBlock(
     bool detectedBlueTile = false;
     bool detectedCheckpoint = false;
     const unsigned long motionStartTime = millis();
+    _rightCam.print("mode a\n");
+    _leftCam.print("mode a\n");
     while(nowDistance > goalDistance)
     {
         if (stopIfStartButtonInterrupted(_motors))
