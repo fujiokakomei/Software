@@ -65,7 +65,7 @@ frame_count = 0
 now_mode = "A"
 
 last_found = None
-
+last_rect = None  
 
 task = kpu.load(model_1_path)
 kpu.init_yolo2(task, 0.5, 0.3, 5, anchors_1)
@@ -115,9 +115,9 @@ while True:
                         cx = x + w / 2
                         cy = y + h / 2
 
-                        if 100 < cx and cx < 124 and 100 < cy and cy < 124:
+                        if 100 < cx and cx < 124:
                             uart.write("found\n")
-                            last_found = label_text
+                            last_found, last_rect = label_text, (x, y, w, h) 
                             # Teensy から mode b が返るまで同じ検出を通知しない。
                             now_mode = "WAIT_B"
                             break
@@ -161,7 +161,7 @@ while True:
                 else:
                     uart.write("-1\n") #被災者違ったわ
             else: #Cognitive TargetでモードBに入った時
-                uart.write(str(ct_reader.decide(sensor.snapshot)) + "\n")
+                uart.write(str(ct_reader.decide(sensor.snapshot, last_rect)) + "\n")
 
         elif now_mode == "C":
             pass

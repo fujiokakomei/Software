@@ -3,14 +3,16 @@
 # main.py での使い方:
 #     import ct_reader
 #     ...
-#     uart.write(str(ct_reader.decide(sensor.snapshot)) + "\n")   # 0 / 1 / 2 / -1
+#     uart.write(str(ct_reader.decide(sensor.snapshot, last_rect)) + "\n")   # 0 / 1 / 2 / -1
+#     (last_rect は mode A で found を出したときの bbox (x, y, w, h))
 #
 # 戻り値は「ロボットが投下するレスキューキット数」と同じ:
 #     合計 0 (Unharmed) -> 0,  合計 1 (Stable) -> 1,  合計 2 (Harmed) -> 2
 #     合計が 0/1/2 以外 / 読み取り失敗 -> -1   (victimではない: 識別してはいけない)
 #
 # 方針（YOLOのbboxには頼らない）
-#   1. 画像中心(またはhint)から外向きにレイを飛ばして外周を検出 -> 円フィットで中心と半径Rを求める
+#   1. 開始点から外向きにレイを飛ばして外周を検出 -> 円フィットで中心と半径Rを求める
+#      開始点: x = 画像の中央（ロボットを動かして合わせる前提）, y = bboxの中心（bboxのw,hやxは使わない）
 #   2. リング k(0..4) の中央 r = (0.2k + 0.1) * R を全周サンプリング
 #   3. 壁(白)で正規化した色を 黒/赤/黄/緑/青 に分類 -> リングごとに多数決
 #   4. 5リングの値を合計。隣り合う同色リングも統合せず、5層それぞれを数える
@@ -249,21 +251,21 @@ def _read_rings(ctx, cx, cy, R):
 
 def read_once(img, hint=None):
     """1フレームから値(0/1/2)を返す。読めない/victimでない場合は None。
-    hint=(x, y, w, h) はYOLOのbbox（任意）。無ければ画像中心を使う。"""
+    hint=(x, y, w, h) はYOLOのbbox。外周検出の開始点は
+        x = 画像の中央 (W/2)   ... ロボットを動かして合わせてある前提なのでbboxのxは使わない
+        y = bboxの中心 (y+h/2) ... yは動かせないのでbboxから取る
+    hintがNoneのときはyも画像中央を使う。bboxの大きさ(w,h)は使わない。"""
     W = img.width()
     H = img.height()
     ref = _wall_ref(img, W, H)
     ctx = (img, W, H, (1.0 / ref[0], 1.0 / ref[1], 1.0 / ref[2]))
 
+    cx0 = W / 2
     if hint:
-        hx, hy, hw, hh = hint
-        cx0 = hx + hw / 2
-        cy0 = hy + hh / 2
-        rmax = int(0.9 * max(hw, hh)) + 4
+        cy0 = hint[1] + hint[3] / 2
     else:
-        cx0 = W / 2
         cy0 = H / 2
-        rmax = min(W, H) // 2 - 2
+    rmax = min(W, H) // 2 - 2
 
     st = _find_start(ctx, cx0, cy0)
     if st is None:
@@ -293,9 +295,6 @@ def read_once(img, hint=None):
     if R < R_MIN or R > R_MAX or rms > FIT_RMS * R:
         _log("NG: not circle-like R=%d rms=%.1f" % (int(R), rms))
         return None
-    if hint and not (0.5 < 2 * R / max(hw, hh) < 1.6):
-        _log("NG: size mismatch with hint", int(R), hw, hh)
-        return None
 
     cols = _read_rings(ctx, cx, cy, R)
     if cols is None:
@@ -309,8 +308,9 @@ def read_once(img, hint=None):
 
 
 def decide(snap, hint=None, n_frames=5, min_agree=3):
-    """snap: 画像を返す関数 (sensor.snapshot)。
-    最大n_frames枚読み、min_agree枚以上一致した値(0/1/2)を返す。合意できなければ -1。"""
+    """snap: 画像を返す関数 (sensor.snapshot)。hint: found時のbbox (x, y, w, h)。
+    開始点は x=画像中央, y=bbox中心。最大n_frames枚読み、min_agree枚以上一致した値(0/1/2)を返す。
+    合意できなければ -1。"""
     votes = [0, 0, 0]
     for i in range(n_frames):
         v = read_once(snap(), hint)
