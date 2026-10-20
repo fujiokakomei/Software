@@ -118,13 +118,21 @@ while True:
                         if 100 < cx and cx < 124 and 100 < cy and cy < 124:
                             uart.write("found\n")
                             last_found = label_text
-                frame_count += 1
+                            # Teensy から mode b が返るまで同じ検出を通知しない。
+                            now_mode = "WAIT_B"
+                            break
+                #frame_count += 1
+        elif now_mode == "WAIT_B":
+            # found を一度送った後の応答待ち。UART 受信処理で mode b に遷移する。
+            pass
         elif now_mode == "B":
             if last_found == "letter": #文字でモードBに入ったとき
                 results = []
                 for i in range(3):
                     img = sensor.snapshot()
                     objects = kpu.run_yolo2(task, img)
+                    frame_result = None
+                    frame_score = 0
                     if objects:
                         for obj in objects:
                             img.draw_rectangle(obj.rect())
@@ -135,10 +143,15 @@ while True:
                             log_line = str(label_text) + ", " + str(score)
                             print(log_line)
 
-                            if score > 0.7:
-                                results.append(label_text)
+                            # 各フレームで最も信頼度が高い候補だけを採用する。
+                            if score > 0.7 and score > frame_score:
+                                frame_result = label_text
+                                frame_score = score
+                    results.append(frame_result)
 
-                if results and all(x == results[0] for x in results):
+                # 3フレームすべてで同じラベルを検出できた場合だけ判定する。
+                if (None not in results and
+                        results[0] == results[1] == results[2]):
                     if results[0] == "2":
                         uart.write("0\n") #投下数0
                     elif results[0] == "3":
