@@ -4,7 +4,7 @@ import sensor, image, time
 import KPU as kpu
 from machine import UART
 from fpioa_manager import fm
-import gc, sys
+import gc, sys, ct_reader 
 
 
 sensor.reset()
@@ -47,6 +47,7 @@ anchors_2 = [2.19, 1.59, 1.36, 0.78, 3.91, 3.41, 2.62, 2.5, 1.19, 1.22]
 
 
 def switch_model(num):
+    global task
     if num == 1:
         kpu.deinit(task)
         task = kpu.load(model_1_path)
@@ -111,8 +112,8 @@ while True:
                         print(log_line)
 
                         x, y, w, h = obj.rect()
-                        cx = (x + w) / 2
-                        cy = (y + h) / 2
+                        cx = x + w / 2
+                        cy = y + h / 2
 
                         if 100 < cx and cx < 124 and 100 < cy and cy < 124:
                             uart.write("found\n")
@@ -137,7 +138,7 @@ while True:
                             if score > 0.7:
                                 results.append(label_text)
 
-                if results[0] == results[1] == results[2]:
+                if results and all(x == results[0] for x in results):
                     if results[0] == "2":
                         uart.write("0\n") #投下数0
                     elif results[0] == "3":
@@ -147,7 +148,7 @@ while True:
                 else:
                     uart.write("-1\n") #被災者違ったわ
             else: #Cognitive TargetでモードBに入った時
-                pass
+                uart.write(str(ct_reader.decide(sensor.snapshot)) + "\n")
 
         elif now_mode == "C":
             pass
