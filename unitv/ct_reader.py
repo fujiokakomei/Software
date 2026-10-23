@@ -12,7 +12,7 @@
 #
 # 方針（YOLOのbboxには頼らない）
 #   1. 開始点から外向きにレイを飛ばして外周を検出 -> 円フィットで中心と半径Rを求める
-#      開始点: x = 画像の中央（ロボットを動かして合わせる前提）, y = bboxの中心（bboxのw,hやxは使わない）
+#      開始点: x = bboxの中心, y = 画像の中央（yはロボットを動かして合わせる前提）。bboxのw,hやyは使わない
 #   2. リング k(0..4) の中央 r = (0.2k + 0.1) * R を全周サンプリング
 #   3. 壁(白)で正規化した色を 黒/赤/黄/緑/青 に分類 -> リングごとに多数決
 #   4. 5リングの値を合計。隣り合う同色リングも統合せず、5層それぞれを数える
@@ -252,19 +252,19 @@ def _read_rings(ctx, cx, cy, R):
 def read_once(img, hint=None):
     """1フレームから値(0/1/2)を返す。読めない/victimでない場合は None。
     hint=(x, y, w, h) はYOLOのbbox。外周検出の開始点は
-        x = 画像の中央 (W/2)   ... ロボットを動かして合わせてある前提なのでbboxのxは使わない
-        y = bboxの中心 (y+h/2) ... yは動かせないのでbboxから取る
-    hintがNoneのときはyも画像中央を使う。bboxの大きさ(w,h)は使わない。"""
+        x = bboxの中心 (x+w/2) ... xは動かせないのでbboxから取る
+        y = 画像の中央 (H/2)   ... ロボットを動かして合わせてある前提なのでbboxのyは使わない
+    hintがNoneのときはxも画像中央を使う。bboxの大きさ(w,h)は使わない。"""
     W = img.width()
     H = img.height()
     ref = _wall_ref(img, W, H)
     ctx = (img, W, H, (1.0 / ref[0], 1.0 / ref[1], 1.0 / ref[2]))
 
-    cx0 = W / 2
+    cy0 = H / 2
     if hint:
-        cy0 = hint[1] + hint[3] / 2
+        cx0 = hint[0] + hint[2] / 2
     else:
-        cy0 = H / 2
+        cx0 = W / 2
     rmax = min(W, H) // 2 - 2
 
     st = _find_start(ctx, cx0, cy0)
@@ -309,7 +309,7 @@ def read_once(img, hint=None):
 
 def decide(snap, hint=None, n_frames=5, min_agree=3):
     """snap: 画像を返す関数 (sensor.snapshot)。hint: found時のbbox (x, y, w, h)。
-    開始点は x=画像中央, y=bbox中心。最大n_frames枚読み、min_agree枚以上一致した値(0/1/2)を返す。
+    開始点は x=bbox中心, y=画像中央。最大n_frames枚読み、min_agree枚以上一致した値(0/1/2)を返す。
     合意できなければ -1。"""
     votes = [0, 0, 0]
     for i in range(n_frames):

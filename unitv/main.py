@@ -115,7 +115,7 @@ while True:
                         cx = x + w / 2
                         cy = y + h / 2
 
-                        if 100 < cx and cx < 124:
+                        if 100 < cy and cy < 124:
                             uart.write("found\n")
                             last_found, last_rect = label_text, (x, y, w, h) 
                             # Teensy から mode b が返るまで同じ検出を通知しない。
