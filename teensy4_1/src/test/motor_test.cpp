@@ -13,11 +13,13 @@ int m3_2 = 5; //    M3------M2
 int m4_1 = 6;
 int m4_2 = 7;
 
+int speed = 255;
+
 void setup()
 {
     _motors.setupMotors(m1_1, m1_2, m2_1, m2_2, m3_1, m3_2, m4_1, m4_2);
     delay(1000);
-
+/*
     for (int i = 100; i < 255; i++)
     {
         analogWrite(m1_1, i);
@@ -97,6 +99,17 @@ void setup()
     _motors.moveLeftSide(200);
     delay(1000);
     _motors.stopRobot();
+*/
 }
 
-void loop(){}
+void loop()
+{
+    analogWrite(m1_1, speed);
+    analogWrite(m1_2, 0);
+    analogWrite(m2_1, speed);
+    analogWrite(m2_2, 0);
+    analogWrite(m3_1, speed);
+    analogWrite(m3_2, 0);
+    analogWrite(m4_1, speed);
+    analogWrite(m4_2, 0);
+}
