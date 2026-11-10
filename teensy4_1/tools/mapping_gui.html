@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RCJ MazeMapper 動作確認</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101827;
+      --panel: #172236;
+      --panel-strong: #202f48;
+      --line: #33445f;
+      --text: #e8eef9;
+      --muted: #a9b8cf;
+      --accent: #56c2ff;
+      --green: #51d69a;
+      --warning: #ffbd59;
+      --danger: #ff7474;
+      --cell: #283a57;
+      --empty: #142035;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--line);
+      background: #111d30;
+    }
+    h1 { margin: 0; font-size: 20px; }
+    h2 { margin: 0 0 12px; font-size: 15px; }
+    h3 { margin: 14px 0 8px; font-size: 13px; color: var(--muted); }
+    p { margin: 0; }
+    button, input, select {
+      font: inherit;
+      color: inherit;
+    }
+    button {
+      border: 1px solid #49617f;
+      border-radius: 6px;
+      padding: 7px 10px;
+      cursor: pointer;
+      color: var(--text);
+      background: #273b59;
+    }
+    button:hover { border-color: var(--accent); background: #314a6e; }
+    button.primary { background: #116ba0; border-color: #36a9ed; }
+    button.danger { color: #ffdada; background: #592a36; border-color: #a95a68; }
+    button.selected { background: #0b80bd; border-color: #7ad5ff; }
+    input, select {
+      min-width: 0;
+      border: 1px solid #415775;
+      border-radius: 5px;
+      padding: 6px 7px;
+      background: #101b2d;
+    }
+    input[type="number"] { width: 68px; }
+    input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: var(--accent); }
+    .header-actions, .toolbar, .row, .inline, .floor-tabs, .wall-buttons {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .pill {
+      padding: 5px 9px;
+      border: 1px solid #365574;
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(460px, 1fr) minmax(330px, 430px);
+      align-items: start;
+      gap: 16px;
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 14px;
+    }
+    .map-panel { min-width: 0; }
+    .toolbar { margin-bottom: 13px; }
+    .toolbar .spacer { flex: 1; }
+    .map-wrap {
+      overflow: auto;
+      max-height: calc(100vh - 190px);
+      min-height: 420px;
+      border: 1px solid #2c405c;
+      border-radius: 8px;
+      background-color: #101b2d;
+      background-image: linear-gradient(#1a2a42 1px, transparent 1px), linear-gradient(90deg, #1a2a42 1px, transparent 1px);
+      background-size: 24px 24px;
+      padding: 18px;
+    }
+    #map-grid {
+      display: grid;
+      gap: 2px;
+      width: max-content;
+      margin: auto;
+      padding: 3px;
+      border: 1px solid #48617e;
+      background: #48617e;
+    }
+    .cell {
+      position: relative;
+      width: 58px;
+      height: 58px;
+      overflow: hidden;
+      border: 2px solid transparent;
+      border-radius: 2px;
+      background: var(--cell);
+      cursor: pointer;
+      user-select: none;
+    }
+    .cell.empty { background: var(--empty); opacity: .72; }
+    .cell:hover { filter: brightness(1.2); }
+    .cell.wall-n { border-top-color: #f3f7ff; }
+    .cell.wall-e { border-right-color: #f3f7ff; }
+    .cell.wall-s { border-bottom-color: #f3f7ff; }
+    .cell.wall-w { border-left-color: #f3f7ff; }
+    .cell.selected { outline: 3px solid var(--accent); outline-offset: -4px; z-index: 2; }
+    .cell.focused { box-shadow: inset 0 0 0 3px #ffdc72; }
+    .cell.path { box-shadow: inset 0 0 0 4px #51d69a; }
+    .cell.path.selected { outline-color: var(--accent); }
+    .cell.unvisited { box-shadow: inset 0 0 0 4px #ffbd59; }
+    .cell.path.unvisited { box-shadow: inset 0 0 0 4px #51d69a, inset 0 0 0 8px #ffbd59; }
+    .cell.black { background: #090e16; }
+    .cell.red { background: #7e2635; }
+    .cell.blue { background: #14558a; }
+    .cell.slope { background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.23) 0 6px, transparent 6px 12px); }
+    .coord { position: absolute; top: 3px; left: 4px; color: #b8c9e1; font-size: 10px; }
+    .badges { position: absolute; right: 3px; bottom: 2px; display: flex; gap: 2px; align-items: center; font-size: 14px; }
+    .visited-mark { position: absolute; left: 5px; bottom: 3px; color: #98f1c8; font-size: 17px; }
+    .robot { position: absolute; left: 22px; top: 18px; color: white; font-size: 23px; line-height: 1; text-shadow: 0 1px 4px #000; }
+    .start-goal { position: absolute; left: 4px; top: 17px; display: grid; gap: 1px; color: #fff; font-size: 10px; font-weight: 700; }
+    .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; color: var(--muted); font-size: 12px; }
+    .legend span::before { content: ""; display: inline-block; width: 11px; height: 11px; margin-right: 4px; border: 1px solid #8294ad; vertical-align: -1px; }
+    .legend .l-black::before { background: #090e16; }
+    .legend .l-red::before { background: #7e2635; }
+    .legend .l-blue::before { background: #14558a; }
+    .legend .l-path::before { background: #283a57; box-shadow: inset 0 0 0 3px #51d69a; }
+    .side { display: grid; gap: 16px; }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      align-items: end;
+    }
+    .form-grid.wide { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+    label.check { display: flex; align-items: center; gap: 7px; color: var(--text); font-size: 13px; }
+    .detail {
+      padding: 10px;
+      border: 1px solid #344a67;
+      border-radius: 7px;
+      background: #132036;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .flags { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .wall-buttons button { min-width: 38px; }
+    .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .result { min-height: 42px; color: #d9ecff; }
+    #history {
+      max-height: 238px;
+      overflow: auto;
+      display: grid;
+      gap: 6px;
+    }
+    .history-item { border-left: 3px solid #438fc0; padding: 5px 8px; background: #132036; color: #bac9dc; font-size: 12px; }
+    .history-item strong { color: #eaf5ff; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .status { color: #b9dfff; font-size: 13px; }
+    @media (max-width: 930px) {
+      main { grid-template-columns: 1fr; }
+      .map-wrap { max-height: 65vh; }
+    }
+    @media (max-width: 520px) {
+      header { align-items: flex-start; flex-direction: column; padding: 14px; }
+      main { padding: 10px; }
+      .cell { width: 48px; height: 48px; }
+      .robot { left: 17px; top: 13px; }
+      .form-grid, .form-grid.wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>MazeMapper マップ作成・動作確認</h1>
+      <p class="muted">座標は x: 東(+)、y: 北(+)。空白マスをクリックすると <code>cell()</code> でセルを作成します。</p>
+    </div>
+    <div class="header-actions">
+      <span id="map-summary" class="pill"></span>
+      <button id="sample-button">サンプルを作成</button>
+      <button id="clear-button" class="danger">clear()</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel map-panel">
+      <div class="toolbar">
+        <div class="floor-tabs" aria-label="表示フロア">
+          <button class="floor-button selected" data-floor="0">1階 / floor 0</button>
+          <button class="floor-button" data-floor="1">2階 / floor 1</button>
+        </div>
+        <span class="spacer"></span>
+        <label class="inline">選択中心からの表示範囲 ±<input id="view-radius" type="number" min="3" max="15" value="5"></label>
+        <button id="fit-button">全セルを表示</button>
+      </div>
+      <div class="map-wrap"><div id="map-grid" aria-label="マップ"></div></div>
+      <div class="legend">
+        <span class="l-black">黒（進入禁止）</span><span class="l-red">赤（進入禁止）</span><span class="l-blue">青（コスト100）</span>
+        <span class="l-path">経路</span><span>斜線: slope</span><span>✓: visited</span><span>⬆/⬇: フロアリンク</span>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <h2>選択セル / <code>cell()</code>・<code>findCell()</code>・<code>floorMap()</code></h2>
+        <div class="form-grid">
+          <label>floor<select id="selected-floor"><option value="0">0（1階）</option><option value="1">1（2階）</option></select></label>
+          <label>x<input id="selected-x" type="number" value="0"></label>
+          <label>y<input id="selected-y" type="number" value="0"></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="select-cell" class="primary">cell() で作成/選択</button>
+          <button id="find-cell">findCell()</button>
+          <span id="cell-status" class="status"></span>
+        </div>
+        <h3>Cell フラグ（選択セルに即時反映）</h3>
+        <div class="flags">
+          <label class="check"><input data-property="visited" type="checkbox">visited</label>
+          <label class="check"><input data-property="isBlack" type="checkbox">isBlack</label>
+          <label class="check"><input data-property="isRed" type="checkbox">isRed</label>
+          <label class="check"><input data-property="isBlue" type="checkbox">isBlue</label>
+          <label class="check"><input data-property="isCheckpoint" type="checkbox">isCheckpoint</label>
+          <label class="check"><input data-property="slope" type="checkbox">slope</label>
+          <label class="check"><input data-property="isDropped" type="checkbox">isDropped</label>
+        </div>
+        <h3><code>setWall()</code> — 隣接セルの逆側の壁も同時に更新</h3>
+        <div class="wall-buttons">
+          <button data-wall="0">北 N</button><button data-wall="1">東 E</button><button data-wall="2">南 S</button><button data-wall="3">西 W</button>
+        </div>
+        <div id="cell-detail" class="detail" style="margin-top:10px"></div>
+      </section>
+
+      <section class="panel">
+        <h2>方向・移動・隣接セル関数</h2>
+        <div class="form-grid wide">
+          <label>x<input id="pose-x" type="number" value="0"></label>
+          <label>y<input id="pose-y" type="number" value="0"></label>
+          <label>向き<select id="pose-dir"><option value="0">NORTH</option><option value="1">EAST</option><option value="2">SOUTH</option><option value="3">WEST</option></select></label>
+          <label>タイル数<input id="pose-tiles" type="number" min="1" value="1"></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="move-forward">moveForward()</button><button id="move-backward">moveBackward()</button>
+          <button id="turn-right">turnRight()</button><button id="turn-left">turnLeft()</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="relative-to-absolute">relativeToAbsolute()</button>
+          <label class="inline">relative<select id="relative-dir"><option value="0">0: 前</option><option value="1">1: 右</option><option value="2">2: 後</option><option value="3">3: 左</option></select></label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button data-neighbor="next">getNextCell()</button><button data-neighbor="right">getRightCell()</button>
+          <button data-neighbor="left">getLeftCell()</button><button data-neighbor="behind">getBehindCell()</button>
+        </div>
+        <p class="hint" style="margin-top:9px">隣接セル関数は壁を判定せず、対象セルが map 内に存在するかだけを返します。黄色い枠が戻り値のセルです。</p>
+      </section>
+
+      <section class="panel">
+        <h2>マップ更新・マーク・坂</h2>
+        <div class="form-grid wide">
+          <label>floor<select id="update-floor"><option value="0">0（1階）</option><option value="1">1（2階）</option></select></label>
+          <label>x<input id="update-x" type="number" value="0"></label>
+          <label>y<input id="update-y" type="number" value="0"></label>
+          <label>向き<select id="update-dir"><option value="0">NORTH</option><option value="1">EAST</option><option value="2">SOUTH</option><option value="3">WEST</option></select></label>
+        </div>
+        <div class="row" style="margin-top:9px">
+          <label class="check"><input id="sense-front" type="checkbox">前に壁</label>
+          <label class="check"><input id="sense-right" type="checkbox">右に壁</label>
+          <label class="check"><input id="sense-back" type="checkbox">後に壁</label>
+          <label class="check"><input id="sense-left" type="checkbox">左に壁</label>
+          <button id="update-map" class="primary">updateMap()</button>
+        </div>
+        <div class="row" style="margin-top:11px">
+          <span class="muted">選択セルを：</span>
+          <button data-mark="visited">markVisited()</button><button data-mark="black">markBlack()</button><button data-mark="red">markRed()</button>
+          <button data-mark="blue">markBlue()</button><button data-mark="checkpoint">markCheckpoint()</button><button data-mark="slope">markSlope()</button>
+        </div>
+        <div class="row" style="margin-top:11px">
+          <button id="ramp-up">markRampUp()</button><button id="ramp-down">markRampDown()</button>
+          <label class="inline">開始 floor<select id="ramp-floor"><option value="0">0</option><option value="1">1</option></select></label>
+          <label class="inline">向き<select id="ramp-dir"><option value="0">NORTH</option><option value="1">EAST</option><option value="2">SOUTH</option><option value="3">WEST</option></select></label>
+        </div>
+        <p class="hint" style="margin-top:9px">坂の開始座標は選択セルです。<code>markRampUp/Down(fromX, fromY, dir)</code> 相当の既定オーバーロードは、それぞれ floor 0 / 1 を指定して実行できます。</p>
+      </section>
+
+      <section class="panel">
+        <h2>最短経路・探索完了判定</h2>
+        <div class="form-grid wide">
+          <label>開始 floor<select id="start-floor"><option value="0">0</option><option value="1">1</option></select></label>
+          <label>開始 x<input id="start-x" type="number" value="0"></label>
+          <label>開始 y<input id="start-y" type="number" value="0"></label>
+          <button id="start-from-selection">開始←選択</button>
+          <label>目標 floor<select id="goal-floor"><option value="0">0</option><option value="1">1</option></select></label>
+          <label>目標 x<input id="goal-x" type="number" value="2"></label>
+          <label>目標 y<input id="goal-y" type="number" value="2"></label>
+          <button id="goal-from-selection">目標←選択</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="shortest-one">shortestPath(floor, ...)</button>
+          <button id="shortest-multi" class="primary">shortestPath(FloorPosition)</button>
+          <button id="closed-one">isMazeClosed(floor)</button>
+          <button id="closed-multi">isMazeClosed(全階)</button>
+        </div>
+        <div id="result" class="detail result" style="margin-top:10px">操作結果はここに表示されます。</div>
+      </section>
+
+      <section class="panel">
+        <h2>実行履歴</h2>
+        <div id="history"><p class="muted">まだ操作はありません。</p></div>
+      </section>
+    </aside>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const NORTH = 0, EAST = 1, SOUTH = 2, WEST = 3;
+      const DIRECTIONS = ["NORTH", "EAST", "SOUTH", "WEST"];
+      const ARROWS = ["↑", "→", "↓", "←"];
+      const dx = [0, 1, 0, -1];
+      const dy = [1, 0, -1, 0];
+      const key = (x, y) => `${x},${y}`;
+      const floorKey = (floor, x, y) => `${floor}:${x},${y}`;
+      const positionText = (floor, x, y) => `(${floor}, ${x}, ${y})`;
+      const $ = (id) => document.getElementById(id);
+      const integer = (id) => Number.parseInt($(id).value, 10) || 0;
+      const direction = (id) => integer(id);
+
+      function newCell() {
+        return {
+          wall: [false, false, false, false], visited: false, slope: false,
+          isBlack: false, isBlue: false, isCheckpoint: false, isRed: false,
+          isDropped: false, hasFloorLink: false, linkedFloor: 0, linkedX: 0,
+          linkedY: 0, floorLinkDirection: NORTH
+        };
+      }
+
+      // Mapping.cpp と同じ規則で動く、ブラウザ用の小さな MazeMapper 実装です。
+      class MazeMapperModel {
+        constructor() {
+          this.floors = [new Map(), new Map()];
+          this.lastCheckpoint = { floor: 0, x: 0, y: 0 };
+        }
+        validFloor(floor) { return floor >= 0 && floor < 2; }
+        cell(floor, x, y) {
+          const map = this.floors[floor];
+          const k = key(x, y);
+          if (!map.has(k)) map.set(k, newCell());
+          return map.get(k);
+        }
+        findCell(floor, x, y) {
+          return this.validFloor(floor) ? (this.floors[floor].get(key(x, y)) || null) : null;
+        }
+        getOffsetCell(floor, x, y, dir) { return this.findCell(floor, x + dx[dir], y + dy[dir]); }
+        getNextCell(floor, x, y, dir) { return this.getOffsetCell(floor, x, y, dir); }
+        getRightCell(floor, x, y, dir) { return this.getOffsetCell(floor, x, y, (dir + 1) % 4); }
+        getLeftCell(floor, x, y, dir) { return this.getOffsetCell(floor, x, y, (dir + 3) % 4); }
+        getBehindCell(floor, x, y, dir) { return this.getOffsetCell(floor, x, y, (dir + 2) % 4); }
+        floorMap(floor) { return this.floors[floor]; }
+        clear() { this.floors.forEach((map) => map.clear()); }
+        relativeToAbsolute(now, relative) { return (now + relative) % 4; }
+        moveForward(pose, tiles = 1) { pose.x += dx[pose.dir] * tiles; pose.y += dy[pose.dir] * tiles; }
+        moveBackward(pose, tiles = 1) { pose.x -= dx[pose.dir] * tiles; pose.y -= dy[pose.dir] * tiles; }
+        turnRight(pose) { pose.dir = (pose.dir + 1) % 4; }
+        turnLeft(pose) { pose.dir = (pose.dir + 3) % 4; }
+        markVisited(f, x, y, value = true) { this.cell(f, x, y).visited = value; }
+        markBlack(f, x, y, value = true) { this.cell(f, x, y).isBlack = value; }
+        markRed(f, x, y, value = true) { this.cell(f, x, y).isRed = value; }
+        markBlue(f, x, y, value = true) { this.cell(f, x, y).isBlue = value; }
+        markCheckpoint(f, x, y, value = true) {
+          this.cell(f, x, y).isCheckpoint = value;
+          this.lastCheckpoint = { floor: f, x, y };
+        }
+        markSlope(f, x, y, value = true) { this.cell(f, x, y).slope = value; }
+        setWall(floor, x, y, dir, exists) {
+          const current = this.cell(floor, x, y);
+          current.wall[dir] = exists;
+          const nx = x + dx[dir], ny = y + dy[dir];
+          this.cell(floor, nx, ny).wall[(dir + 2) % 4] = exists;
+        }
+        updateMap(floor, x, y, dir, sense) {
+          this.cell(floor, x, y).visited = true;
+          for (let relative = 0; relative < 4; relative++) {
+            this.setWall(floor, x, y, this.relativeToAbsolute(dir, relative), sense[relative]);
+          }
+        }
+        markRampUp(fromFloor, fromX, fromY, dir) {
+          if (fromFloor < 0 || fromFloor + 1 >= 2) return false;
+          const slopeX = fromX + dx[dir], slopeY = fromY + dy[dir];
+          const upperX = slopeX + dx[dir], upperY = slopeY + dy[dir], upperFloor = fromFloor + 1;
+          const slopeCell = this.cell(fromFloor, slopeX, slopeY);
+          const upperCell = this.cell(upperFloor, upperX, upperY);
+          slopeCell.slope = true; slopeCell.hasFloorLink = true;
+          slopeCell.linkedFloor = upperFloor; slopeCell.linkedX = upperX; slopeCell.linkedY = upperY; slopeCell.floorLinkDirection = dir;
+          upperCell.hasFloorLink = true;
+          upperCell.linkedFloor = fromFloor; upperCell.linkedX = slopeX; upperCell.linkedY = slopeY; upperCell.floorLinkDirection = (dir + 2) % 4;
+          return true;
+        }
+        markRampDown(fromFloor, fromX, fromY, dir) {
+          if (fromFloor <= 0 || fromFloor >= 2) return false;
+          const slopeX = fromX + dx[dir], slopeY = fromY + dy[dir];
+          const lowerX = slopeX + dx[dir], lowerY = slopeY + dy[dir], lowerFloor = fromFloor - 1;
+          const slopeCell = this.cell(fromFloor, slopeX, slopeY);
+          const lowerCell = this.cell(lowerFloor, lowerX, lowerY);
+          slopeCell.slope = true; slopeCell.hasFloorLink = true;
+          slopeCell.linkedFloor = lowerFloor; slopeCell.linkedX = lowerX; slopeCell.linkedY = lowerY; slopeCell.floorLinkDirection = dir;
+          lowerCell.hasFloorLink = true;
+          lowerCell.linkedFloor = fromFloor; lowerCell.linkedX = slopeX; lowerCell.linkedY = slopeY; lowerCell.floorLinkDirection = (dir + 2) % 4;
+          return true;
+        }
+        compareState(a, b) {
+          if (a.cost !== b.cost) return a.cost - b.cost;
+          if (a.floor !== b.floor) return a.floor - b.floor;
+          if (a.x !== b.x) return a.x - b.x;
+          return a.y - b.y;
+        }
+        shortestPathOne(floor, sx, sy, gx, gy) {
+          const maze = this.floors[floor];
+          const start = key(sx, sy), goal = key(gx, gy);
+          if (!maze.has(start) || !maze.has(goal)) return [];
+          const queue = [{ cost: 0, floor, x: sx, y: sy }];
+          const minCost = new Map([[start, 0]]), parent = new Map();
+          while (queue.length) {
+            queue.sort((a, b) => this.compareState(a, b));
+            const current = queue.shift(), currentKey = key(current.x, current.y);
+            if (current.cost > minCost.get(currentKey)) continue;
+            if (current.x === gx && current.y === gy) break;
+            const currentCell = maze.get(currentKey);
+            for (let dir = 0; dir < 4; dir++) {
+              if (currentCell.wall[dir]) continue;
+              const nx = current.x + dx[dir], ny = current.y + dy[dir], nextKey = key(nx, ny);
+              const nextCell = maze.get(nextKey);
+              if (!nextCell || nextCell.isBlack || nextCell.isRed) continue;
+              if (!nextCell.visited && nextKey !== goal) continue;
+              const nextCost = current.cost + ((nextCell.isBlue || nextCell.slope) ? 100 : 1);
+              if (!minCost.has(nextKey) || nextCost < minCost.get(nextKey)) {
+                minCost.set(nextKey, nextCost); parent.set(nextKey, currentKey);
+                queue.push({ cost: nextCost, floor, x: nx, y: ny });
+              }
+            }
+          }
+          if (!minCost.has(goal)) return [];
+          const path = []; let currentKey = goal;
+          while (currentKey !== start) {
+            const [x, y] = currentKey.split(",").map(Number); path.push({ floor, x, y }); currentKey = parent.get(currentKey);
+          }
+          path.push({ floor, x: sx, y: sy }); return path.reverse();
+        }
+        shortestPathMulti(start, goal) {
+          if (!this.validFloor(start.floor) || !this.validFloor(goal.floor)) return [];
+          if (!this.findCell(start.floor, start.x, start.y) || !this.findCell(goal.floor, goal.x, goal.y)) return [];
+          const startKey = floorKey(start.floor, start.x, start.y), goalKey = floorKey(goal.floor, goal.x, goal.y);
+          const queue = [{ cost: 0, ...start }];
+          const minCost = new Map([[startKey, 0]]), parent = new Map();
+          const visit = (current, next, edgeCost) => {
+            const nextKey = floorKey(next.floor, next.x, next.y), currentKey = floorKey(current.floor, current.x, current.y);
+            const nextCost = current.cost + edgeCost;
+            if (!minCost.has(nextKey) || nextCost < minCost.get(nextKey)) {
+              minCost.set(nextKey, nextCost); parent.set(nextKey, currentKey); queue.push({ cost: nextCost, ...next });
+            }
+          };
+          while (queue.length) {
+            queue.sort((a, b) => this.compareState(a, b));
+            const current = queue.shift(), currentKey = floorKey(current.floor, current.x, current.y);
+            if (current.cost > minCost.get(currentKey)) continue;
+            if (currentKey === goalKey) break;
+            const currentCell = this.findCell(current.floor, current.x, current.y);
+            if (!currentCell) continue;
+            for (let dir = 0; dir < 4; dir++) {
+              if (currentCell.wall[dir]) continue;
+              const next = { floor: current.floor, x: current.x + dx[dir], y: current.y + dy[dir] };
+              const nextCell = this.findCell(next.floor, next.x, next.y);
+              if (!nextCell || nextCell.isBlack || nextCell.isRed) continue;
+              if (!nextCell.visited && floorKey(next.floor, next.x, next.y) !== goalKey) continue;
+              visit(current, next, (nextCell.isBlue || nextCell.slope) ? 100 : 1);
+            }
+            if (currentCell.hasFloorLink) {
+              const next = { floor: currentCell.linkedFloor, x: currentCell.linkedX, y: currentCell.linkedY };
+              const nextCell = this.validFloor(next.floor) ? this.findCell(next.floor, next.x, next.y) : null;
+              if (nextCell && !nextCell.isBlack && !nextCell.isRed && (nextCell.visited || floorKey(next.floor, next.x, next.y) === goalKey)) visit(current, next, 100);
+            }
+          }
+          if (!minCost.has(goalKey)) return [];
+          const path = []; let currentKey = goalKey;
+          while (currentKey !== startKey) {
+            const [floor, xy] = currentKey.split(":"); const [x, y] = xy.split(",").map(Number);
+            path.push({ floor: Number(floor), x, y }); currentKey = parent.get(currentKey);
+          }
+          path.push({ ...start }); return path.reverse();
+        }
+        sortedEntries(floor) {
+          return [...this.floors[floor].entries()].sort((a, b) => {
+            const [ax, ay] = a[0].split(",").map(Number), [bx, by] = b[0].split(",").map(Number);
+            return ax - bx || ay - by;
+          });
+        }
+        isMazeClosedOne(floor) {
+          const unvisited = [];
+          for (const [position, current] of this.sortedEntries(floor)) {
+            if (!current.visited) continue;
+            const [x, y] = position.split(",").map(Number);
+            for (let dir = 0; dir < 4; dir++) {
+              if (current.wall[dir]) continue;
+              const nx = x + dx[dir], ny = y + dy[dir], next = this.findCell(floor, nx, ny);
+              if (!next || (!next.visited && !next.isBlack && !next.isRed)) unvisited.push({ floor, x: nx, y: ny });
+            }
+          }
+          return { closed: unvisited.length === 0, unvisited };
+        }
+        isMazeClosedMulti() {
+          const unvisited = [];
+          for (let floor = 0; floor < 2; floor++) {
+            for (const [position, current] of this.sortedEntries(floor)) {
+              if (!current.visited) continue;
+              const [x, y] = position.split(",").map(Number);
+              for (let dir = 0; dir < 4; dir++) {
+                if (current.wall[dir]) continue;
+                const nx = x + dx[dir], ny = y + dy[dir], next = this.findCell(floor, nx, ny);
+                if (!next || (!next.visited && !next.isBlack && !next.isRed)) unvisited.push({ floor, x: nx, y: ny });
+              }
+              if (current.hasFloorLink) {
+                const next = { floor: current.linkedFloor, x: current.linkedX, y: current.linkedY };
+                const target = this.validFloor(next.floor) ? this.findCell(next.floor, next.x, next.y) : null;
+                if (!target || (!target.visited && !target.isBlack && !target.isRed)) unvisited.push(next);
+              }
+            }
+          }
+          return { closed: unvisited.length === 0, unvisited };
+        }
+      }
+
+      const mapper = new MazeMapperModel();
+      let activeFloor = 0;
+      let selected = { floor: 0, x: 0, y: 0 };
+      let focused = null;
+      let path = [];
+      let unvisited = [];
+      let fitBounds = null;
+      const history = [];
+
+      function pose() { return { x: integer("pose-x"), y: integer("pose-y"), dir: direction("pose-dir") }; }
+      function savePose(next) { $("pose-x").value = next.x; $("pose-y").value = next.y; $("pose-dir").value = next.dir; }
+      function selectedCell() { return mapper.cell(selected.floor, selected.x, selected.y); }
+      function cellCoordinates() { return `floor ${selected.floor}, x ${selected.x}, y ${selected.y}`; }
+      function setResult(text) { $("result").textContent = text; }
+      function log(name, text) {
+        history.unshift({ name, text });
+        $("history").innerHTML = history.slice(0, 24).map((entry) => `<div class="history-item"><strong>${entry.name}</strong><br>${entry.text}</div>`).join("");
+      }
+      function syncInputsFromSelected() {
+        $("selected-floor").value = selected.floor; $("selected-x").value = selected.x; $("selected-y").value = selected.y;
+      }
+      function setSelected(floor, x, y, makeCell = false) {
+        selected = { floor, x, y }; activeFloor = floor; fitBounds = null;
+        if (makeCell) mapper.cell(floor, x, y);
+        syncInputsFromSelected(); render();
+      }
+      function describeCell(cell) {
+        if (!cell) return "findCell() = nullptr（まだ作成されていません）";
+        const walls = cell.wall.map((exists, index) => `${DIRECTIONS[index]}:${exists ? "壁" : "通路"}`).join("  ");
+        const link = cell.hasFloorLink ? `${positionText(cell.linkedFloor, cell.linkedX, cell.linkedY)} / 向き ${DIRECTIONS[cell.floorLinkDirection]}` : "なし";
+        return `Cell ${positionText(selected.floor, selected.x, selected.y)}\n${walls}\nvisited=${cell.visited}  black=${cell.isBlack}  red=${cell.isRed}  blue=${cell.isBlue}\ncheckpoint=${cell.isCheckpoint}  slope=${cell.slope}  dropped=${cell.isDropped}\nfloor link: ${link}`;
+      }
+      function syncPropertyInputs() {
+        const cell = mapper.findCell(selected.floor, selected.x, selected.y);
+        document.querySelectorAll("[data-property]").forEach((input) => { input.checked = !!cell?.[input.dataset.property]; });
+        document.querySelectorAll("[data-wall]").forEach((button) => {
+          button.classList.toggle("selected", !!cell?.wall[Number(button.dataset.wall)]);
+        });
+        $("cell-detail").textContent = describeCell(cell);
+        $("cell-status").textContent = cell ? `map に存在（floorMap: ${mapper.floorMap(selected.floor).size} セル）` : "map に未作成";
+      }
+      function boundsForRender() {
+        if (fitBounds) return fitBounds;
+        const radius = Math.max(3, Math.min(15, integer("view-radius") || 5));
+        return { minX: selected.x - radius, maxX: selected.x + radius, minY: selected.y - radius, maxY: selected.y + radius };
+      }
+      function classForCell(cell, floor, x, y) {
+        const classes = ["cell"];
+        if (!cell) classes.push("empty");
+        else {
+          if (cell.isBlack) classes.push("black"); if (cell.isRed) classes.push("red"); if (cell.isBlue) classes.push("blue"); if (cell.slope) classes.push("slope");
+          cell.wall.forEach((exists, dir) => { if (exists) classes.push(["wall-n", "wall-e", "wall-s", "wall-w"][dir]); });
+        }
+        if (selected.floor === floor && selected.x === x && selected.y === y) classes.push("selected");
+        if (focused && focused.floor === floor && focused.x === x && focused.y === y) classes.push("focused");
+        if (path.some((item) => item.floor === floor && item.x === x && item.y === y)) classes.push("path");
+        if (unvisited.some((item) => item.floor === floor && item.x === x && item.y === y)) classes.push("unvisited");
+        return classes.join(" ");
+      }
+      function renderCell(floor, x, y) {
+        const cell = mapper.findCell(floor, x, y), p = pose();
+        const start = { floor: integer("start-floor"), x: integer("start-x"), y: integer("start-y") };
+        const goal = { floor: integer("goal-floor"), x: integer("goal-x"), y: integer("goal-y") };
+        const robot = floor === activeFloor && p.x === x && p.y === y ? `<span class="robot" title="現在の操作用 Pose">${ARROWS[p.dir]}</span>` : "";
+        const endpoint = `${start.floor}:${start.x},${start.y}` === `${floor}:${x},${y}` ? "S" : "";
+        const goalMark = `${goal.floor}:${goal.x},${goal.y}` === `${floor}:${x},${y}` ? "G" : "";
+        const badges = cell ? `${cell.isCheckpoint ? "⌾" : ""}${cell.hasFloorLink ? (cell.linkedFloor > floor ? "⬆" : "⬇") : ""}${cell.isDropped ? "●" : ""}` : "";
+        return `<button type="button" class="${classForCell(cell, floor, x, y)}" data-map-x="${x}" data-map-y="${y}" title="floor ${floor}, x ${x}, y ${y}${cell ? "" : "（クリックで cell()）"}"><span class="coord">${x},${y}</span>${cell?.visited ? '<span class="visited-mark">✓</span>' : ""}<span class="start-goal">${endpoint}${goalMark}</span>${robot}<span class="badges">${badges}</span></button>`;
+      }
+      function render() {
+        document.querySelectorAll(".floor-button").forEach((button) => button.classList.toggle("selected", Number(button.dataset.floor) === activeFloor));
+        const bounds = boundsForRender(), grid = $("map-grid");
+        const width = bounds.maxX - bounds.minX + 1;
+        grid.style.gridTemplateColumns = `repeat(${width}, 58px)`;
+        let html = "";
+        for (let y = bounds.maxY; y >= bounds.minY; y--) for (let x = bounds.minX; x <= bounds.maxX; x++) html += renderCell(activeFloor, x, y);
+        grid.innerHTML = html;
+        grid.querySelectorAll("[data-map-x]").forEach((button) => button.addEventListener("click", () => {
+          const x = Number(button.dataset.mapX), y = Number(button.dataset.mapY);
+          const wasMissing = !mapper.findCell(activeFloor, x, y);
+          setSelected(activeFloor, x, y, true);
+          if (wasMissing) log("cell()", `${positionText(activeFloor, x, y)} を新規作成`);
+        }));
+        syncPropertyInputs();
+        const counts = mapper.floors.map((map) => map.size);
+        $("map-summary").textContent = `floorMap(): 1階 ${counts[0]} / 2階 ${counts[1]} セル`;
+      }
+      function showPath(label, resultPath) {
+        path = resultPath; unvisited = []; focused = null; render();
+        const text = resultPath.length ? resultPath.map((item) => positionText(item.floor, item.x, item.y)).join(" → ") : "経路なし";
+        setResult(`${label}\n${text}`); log(label, text);
+      }
+      function showClosed(label, closedResult) {
+        path = []; unvisited = closedResult.unvisited; focused = null; render();
+        const text = closedResult.closed ? "探索完了（未探索セルなし）" : `未探索候補 ${closedResult.unvisited.length} 件: ${closedResult.unvisited.map((item) => positionText(item.floor, item.x, item.y)).join(" / ")}`;
+        setResult(`${label}\n${text}`); log(label, text);
+      }
+      function selectionFromInputs() {
+        return { floor: integer("selected-floor"), x: integer("selected-x"), y: integer("selected-y") };
+      }
+      function updateMapInputsFromSelected() {
+        $("update-floor").value = selected.floor; $("update-x").value = selected.x; $("update-y").value = selected.y;
+      }
+      function createSample() {
+        mapper.clear();
+        for (let floor = 0; floor < 2; floor++) {
+          for (let x = -2; x <= 2; x++) for (let y = -2; y <= 2; y++) mapper.markVisited(floor, x, y);
+          for (let x = -2; x <= 2; x++) { mapper.setWall(floor, x, -2, SOUTH, true); mapper.setWall(floor, x, 2, NORTH, true); }
+          for (let y = -2; y <= 2; y++) { mapper.setWall(floor, -2, y, WEST, true); mapper.setWall(floor, 2, y, EAST, true); }
+        }
+        mapper.markBlack(0, -1, 0); mapper.markRed(0, 0, 1); mapper.markBlue(0, 1, 0); mapper.markCheckpoint(0, 0, -1);
+        mapper.markRampUp(0, 0, -2, NORTH);
+        setSelected(0, 0, 0, true); path = []; unvisited = []; focused = null;
+        $("start-floor").value = 0; $("start-x").value = -2; $("start-y").value = -2;
+        $("goal-floor").value = 1; $("goal-x").value = 0; $("goal-y").value = 2;
+        fitBounds = { minX: -3, maxX: 3, minY: -3, maxY: 3 };
+        render(); setResult("サンプルを作成しました。\n青・黒・赤・チェックポイント・フロアリンクを含む 2 フロアのマップです。");
+        log("サンプル", "2フロア各25セルと floor link を作成");
+      }
+
+      document.querySelectorAll(".floor-button").forEach((button) => button.addEventListener("click", () => { activeFloor = Number(button.dataset.floor); fitBounds = null; render(); }));
+      $("view-radius").addEventListener("change", () => { fitBounds = null; render(); });
+      $("fit-button").addEventListener("click", () => {
+        const positions = [...mapper.floorMap(activeFloor).keys()].map((value) => value.split(",").map(Number));
+        if (!positions.length) { fitBounds = null; render(); return; }
+        const xs = positions.map((p) => p[0]), ys = positions.map((p) => p[1]);
+        fitBounds = { minX: Math.min(...xs) - 1, maxX: Math.max(...xs) + 1, minY: Math.min(...ys) - 1, maxY: Math.max(...ys) + 1 };
+        render();
+      });
+      $("clear-button").addEventListener("click", () => {
+        mapper.clear(); path = []; unvisited = []; focused = null; fitBounds = null; render();
+        setResult("clear() を実行しました。両フロアの FloorMap を空にしました。"); log("clear()", "floors_[0] と floors_[1] を clear");
+      });
+      $("sample-button").addEventListener("click", createSample);
+      $("select-cell").addEventListener("click", () => {
+        const next = selectionFromInputs(); setSelected(next.floor, next.x, next.y, true); updateMapInputsFromSelected();
+        setResult(`cell()\n${positionText(next.floor, next.x, next.y)} を作成または取得しました。`); log("cell()", `${positionText(next.floor, next.x, next.y)} を取得`);
+      });
+      $("find-cell").addEventListener("click", () => {
+        const next = selectionFromInputs(), found = mapper.findCell(next.floor, next.x, next.y);
+        focused = found ? next : null; selected = next; activeFloor = next.floor; fitBounds = null; syncInputsFromSelected(); render();
+        const text = found ? `${positionText(next.floor, next.x, next.y)} の Cell を返しました。` : `${positionText(next.floor, next.x, next.y)} は nullptr です。`;
+        setResult(`findCell()\n${text}`); log("findCell()", text);
+      });
+      document.querySelectorAll("[data-property]").forEach((input) => input.addEventListener("change", () => {
+        const cell = selectedCell(), property = input.dataset.property; cell[property] = input.checked;
+        if (property === "isCheckpoint") mapper.lastCheckpoint = { ...selected };
+        render(); log(`cell().${property}`, `${cellCoordinates()} = ${input.checked}`);
+      }));
+      document.querySelectorAll("[data-wall]").forEach((button) => button.addEventListener("click", () => {
+        const dir = Number(button.dataset.wall), cell = selectedCell(), exists = !cell.wall[dir];
+        mapper.setWall(selected.floor, selected.x, selected.y, dir, exists); render();
+        log("setWall()", `${cellCoordinates()} の ${DIRECTIONS[dir]} を ${exists ? "壁" : "通路"} に設定（隣接セルにも反映）`);
+      }));
+      $("move-forward").addEventListener("click", () => { const p = pose(); mapper.moveForward(p, Math.max(1, integer("pose-tiles"))); savePose(p); render(); log("moveForward()", `(${p.x}, ${p.y}), ${DIRECTIONS[p.dir]}`); });
+      $("move-backward").addEventListener("click", () => { const p = pose(); mapper.moveBackward(p, Math.max(1, integer("pose-tiles"))); savePose(p); render(); log("moveBackward()", `(${p.x}, ${p.y}), ${DIRECTIONS[p.dir]}`); });
+      $("turn-right").addEventListener("click", () => { const p = pose(); mapper.turnRight(p); savePose(p); render(); log("turnRight()", `dir = ${DIRECTIONS[p.dir]}`); });
+      $("turn-left").addEventListener("click", () => { const p = pose(); mapper.turnLeft(p); savePose(p); render(); log("turnLeft()", `dir = ${DIRECTIONS[p.dir]}`); });
+      $("relative-to-absolute").addEventListener("click", () => {
+        const result = mapper.relativeToAbsolute(direction("pose-dir"), direction("relative-dir"));
+        const text = `${DIRECTIONS[direction("pose-dir")]} + relative ${direction("relative-dir")} = ${DIRECTIONS[result]} (${result})`;
+        setResult(`relativeToAbsolute()\n${text}`); log("relativeToAbsolute()", text);
+      });
+      document.querySelectorAll("[data-neighbor]").forEach((button) => button.addEventListener("click", () => {
+        const p = pose(), method = button.dataset.neighbor;
+        const dirOffset = { next: 0, right: 1, left: 3, behind: 2 }[method], targetDir = (p.dir + dirOffset) % 4;
+        const cell = mapper[`get${method[0].toUpperCase()}${method.slice(1)}Cell`](activeFloor, p.x, p.y, p.dir);
+        const target = { floor: activeFloor, x: p.x + dx[targetDir], y: p.y + dy[targetDir] };
+        focused = cell ? target : null; render();
+        const text = cell ? `${positionText(target.floor, target.x, target.y)} の Cell を返しました。` : `${positionText(target.floor, target.x, target.y)} は nullptr です。`;
+        setResult(`get${method[0].toUpperCase()}${method.slice(1)}Cell()\n${text}`); log(`get${method[0].toUpperCase()}${method.slice(1)}Cell()`, text);
+      }));
+      $("update-map").addEventListener("click", () => {
+        const f = integer("update-floor"), x = integer("update-x"), y = integer("update-y"), d = direction("update-dir");
+        const sense = [$("sense-front").checked, $("sense-right").checked, $("sense-back").checked, $("sense-left").checked];
+        mapper.updateMap(f, x, y, d, sense); setSelected(f, x, y); render();
+        const text = `${positionText(f, x, y)}, ${DIRECTIONS[d]}, sense=[${sense.map((wall) => wall ? "壁" : "通路").join(", ")}]`;
+        setResult(`updateMap()\n${text}`); log("updateMap()", text);
+      });
+      document.querySelectorAll("[data-mark]").forEach((button) => button.addEventListener("click", () => {
+        const mark = button.dataset.mark, cell = selectedCell(), property = { visited: "visited", black: "isBlack", red: "isRed", blue: "isBlue", checkpoint: "isCheckpoint", slope: "slope" }[mark];
+        const value = !cell[property];
+        const method = `mark${mark[0].toUpperCase()}${mark.slice(1)}`;
+        mapper[method](selected.floor, selected.x, selected.y, value); render();
+        log(`${method}()`, `${cellCoordinates()} = ${value}`);
+      }));
+      function runRamp(up) {
+        const floor = integer("ramp-floor"), dir = direction("ramp-dir");
+        const success = up ? mapper.markRampUp(floor, selected.x, selected.y, dir) : mapper.markRampDown(floor, selected.x, selected.y, dir);
+        render();
+        const name = up ? "markRampUp" : "markRampDown", text = success ? `${positionText(floor, selected.x, selected.y)} から ${DIRECTIONS[dir]} にフロアリンクを作成` : `floor ${floor} では何もしません（範囲外）`;
+        setResult(`${name}()\n${text}`); log(`${name}()`, text);
+      }
+      $("ramp-up").addEventListener("click", () => runRamp(true));
+      $("ramp-down").addEventListener("click", () => runRamp(false));
+      $("start-from-selection").addEventListener("click", () => { $("start-floor").value = selected.floor; $("start-x").value = selected.x; $("start-y").value = selected.y; render(); });
+      $("goal-from-selection").addEventListener("click", () => { $("goal-floor").value = selected.floor; $("goal-x").value = selected.x; $("goal-y").value = selected.y; render(); });
+      ["start-floor", "start-x", "start-y", "goal-floor", "goal-x", "goal-y", "pose-x", "pose-y", "pose-dir"].forEach((id) => $(id).addEventListener("change", render));
+      $("shortest-one").addEventListener("click", () => {
+        const floor = integer("start-floor"), start = { x: integer("start-x"), y: integer("start-y") }, goal = { x: integer("goal-x"), y: integer("goal-y") };
+        showPath("shortestPath(floor, sx, sy, gx, gy)", mapper.shortestPathOne(floor, start.x, start.y, goal.x, goal.y));
+      });
+      $("shortest-multi").addEventListener("click", () => {
+        const start = { floor: integer("start-floor"), x: integer("start-x"), y: integer("start-y") }, goal = { floor: integer("goal-floor"), x: integer("goal-x"), y: integer("goal-y") };
+        showPath("shortestPath(FloorPosition, FloorPosition)", mapper.shortestPathMulti(start, goal));
+      });
+      $("closed-one").addEventListener("click", () => showClosed("isMazeClosed(floor)", mapper.isMazeClosedOne(activeFloor)));
+      $("closed-multi").addEventListener("click", () => showClosed("isMazeClosed(全フロア)", mapper.isMazeClosedMulti()));
+
+      mapper.cell(0, 0, 0);
+      render();
+    })();
+  </script>
+</body>
+</html>
