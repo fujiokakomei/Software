@@ -97,7 +97,9 @@ SearchResult searchApp::decideNextMove(
         const rcj_maze::FloorPosition next = nextPosition(robotPose, absolute);
         const rcj_maze::Cell *nextCell = mazeMapper.findCell(next.floor, next.x, next.y);
 
-        if (!canEnter(nextCell))
+        if (!canEnter(nextCell) ||
+            (nextCell != nullptr && nextCell->slope && nextCell->hasFloorLink &&
+             nextCell->floorLinkDirection != absolute))
         {
             continue;
         }
@@ -181,7 +183,9 @@ SearchResult searchApp::decideNextMove(
         );
         const rcj_maze::FloorPosition next = nextPosition(robotPose, absolute);
         const rcj_maze::Cell *nextCell = mazeMapper.findCell(next.floor, next.x, next.y);
-        if (canEnter(nextCell))
+        if (canEnter(nextCell) &&
+            (nextCell == nullptr || !nextCell->slope || !nextCell->hasFloorLink ||
+             nextCell->floorLinkDirection == absolute))
         {
             return makeResult(robotPose, absolute, nextCell);
         }

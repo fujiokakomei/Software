@@ -7,6 +7,34 @@
 namespace rcj_maze
 {
 
+namespace
+{
+
+Direction opposite(Direction dir)
+{
+    return static_cast<Direction>((static_cast<int>(dir) + 2) % 4);
+}
+
+// 坂セルは、坂の手前から入って反対側のフロアリンクへ進むか、
+// フロアリンクから出て坂の手前へ戻るためだけに使える。
+// map 上で坂セルの横に通常セルが存在していても、横からの進入・退出はしない。
+bool isAllowedSameFloorStep(const Cell &current, const Cell &next, Direction dir)
+{
+    if (current.slope && current.hasFloorLink && dir != opposite(current.floorLinkDirection))
+    {
+        return false;
+    }
+
+    if (next.slope && next.hasFloorLink && dir != next.floorLinkDirection)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+} // namespace
+
 const int MazeMapper::dx[4] = {0, 1, 0, -1};
 const int MazeMapper::dy[4] = {1, 0, -1, 0};
 
@@ -312,6 +340,11 @@ Path MazeMapper::shortestPath(int floor, int sx, int sy, int gx, int gy) const
 
             const Cell &nextCell = nextIt->second;
 
+            if (!isAllowedSameFloorStep(currentCell, nextCell, static_cast<Direction>(dir)))
+            {
+                continue;
+            }
+
             // 黒タイルと赤タイルは進入禁止
             if (nextCell.isBlack || nextCell.isRed)
             {
@@ -430,6 +463,12 @@ FloorPath MazeMapper::shortestPath(const FloorPosition &start, const FloorPositi
             }
 
             const Cell &nextCell = nextIt->second;
+
+            if (!isAllowedSameFloorStep(currentCell, nextCell, static_cast<Direction>(dir)))
+            {
+                continue;
+            }
+
             if (nextCell.isBlack || nextCell.isRed)
             {
                 continue;
@@ -520,6 +559,12 @@ bool MazeMapper::isMazeClosed(int floor, std::vector<Position> &unvisitedCells) 
                 continue;
             }
 
+            if (current.slope && current.hasFloorLink &&
+                dir != static_cast<int>(opposite(current.floorLinkDirection)))
+            {
+                continue;
+            }
+
             Position next = {
                 pos.first + dx[dir],
                 pos.second + dy[dir]
@@ -529,6 +574,12 @@ bool MazeMapper::isMazeClosed(int floor, std::vector<Position> &unvisitedCells) 
             if (it == maze.end())
             {
                 unvisitedCells.push_back(next);
+                continue;
+            }
+
+            if (it->second.slope && it->second.hasFloorLink &&
+                dir != static_cast<int>(it->second.floorLinkDirection))
+            {
                 continue;
             }
 
@@ -567,6 +618,12 @@ bool MazeMapper::isMazeClosed(std::vector<FloorPosition> &unvisitedCells) const
                     continue;
                 }
 
+                if (current.slope && current.hasFloorLink &&
+                    dir != static_cast<int>(opposite(current.floorLinkDirection)))
+                {
+                    continue;
+                }
+
                 FloorPosition next = {
                     floor,
                     pos.first + dx[dir],
@@ -577,6 +634,12 @@ bool MazeMapper::isMazeClosed(std::vector<FloorPosition> &unvisitedCells) const
                 if (it == maze.end())
                 {
                     unvisitedCells.push_back(next);
+                    continue;
+                }
+
+                if (it->second.slope && it->second.hasFloorLink &&
+                    dir != static_cast<int>(it->second.floorLinkDirection))
+                {
                     continue;
                 }
 

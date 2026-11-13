@@ -413,6 +413,12 @@
           const nx = x + dx[dir], ny = y + dy[dir];
           this.cell(floor, nx, ny).wall[(dir + 2) % 4] = exists;
         }
+        isAllowedSameFloorStep(current, next, dir) {
+          // 坂セルは坂の手前との往復だけを許可し、横からの進入・退出を防ぐ。
+          if (current.slope && current.hasFloorLink && dir !== (current.floorLinkDirection + 2) % 4) return false;
+          if (next.slope && next.hasFloorLink && dir !== next.floorLinkDirection) return false;
+          return true;
+        }
         updateMap(floor, x, y, dir, sense) {
           this.cell(floor, x, y).visited = true;
           for (let relative = 0; relative < 4; relative++) {
@@ -466,6 +472,7 @@
               const nx = current.x + dx[dir], ny = current.y + dy[dir], nextKey = key(nx, ny);
               const nextCell = maze.get(nextKey);
               if (!nextCell || nextCell.isBlack || nextCell.isRed) continue;
+              if (!this.isAllowedSameFloorStep(currentCell, nextCell, dir)) continue;
               if (!nextCell.visited && nextKey !== goal) continue;
               const nextCost = current.cost + ((nextCell.isBlue || nextCell.slope) ? 100 : 1);
               if (!minCost.has(nextKey) || nextCost < minCost.get(nextKey)) {
@@ -506,6 +513,7 @@
               const next = { floor: current.floor, x: current.x + dx[dir], y: current.y + dy[dir] };
               const nextCell = this.findCell(next.floor, next.x, next.y);
               if (!nextCell || nextCell.isBlack || nextCell.isRed) continue;
+              if (!this.isAllowedSameFloorStep(currentCell, nextCell, dir)) continue;
               if (!nextCell.visited && floorKey(next.floor, next.x, next.y) !== goalKey) continue;
               visit(current, next, (nextCell.isBlue || nextCell.slope) ? 100 : 1);
             }
@@ -536,7 +544,9 @@
             const [x, y] = position.split(",").map(Number);
             for (let dir = 0; dir < 4; dir++) {
               if (current.wall[dir]) continue;
+              if (current.slope && current.hasFloorLink && dir !== (current.floorLinkDirection + 2) % 4) continue;
               const nx = x + dx[dir], ny = y + dy[dir], next = this.findCell(floor, nx, ny);
+              if (next && next.slope && next.hasFloorLink && dir !== next.floorLinkDirection) continue;
               if (!next || (!next.visited && !next.isBlack && !next.isRed)) unvisited.push({ floor, x: nx, y: ny });
             }
           }
@@ -550,7 +560,9 @@
               const [x, y] = position.split(",").map(Number);
               for (let dir = 0; dir < 4; dir++) {
                 if (current.wall[dir]) continue;
+                if (current.slope && current.hasFloorLink && dir !== (current.floorLinkDirection + 2) % 4) continue;
                 const nx = x + dx[dir], ny = y + dy[dir], next = this.findCell(floor, nx, ny);
+                if (next && next.slope && next.hasFloorLink && dir !== next.floorLinkDirection) continue;
                 if (!next || (!next.visited && !next.isBlack && !next.isRed)) unvisited.push({ floor, x: nx, y: ny });
               }
               if (current.hasFloorLink) {
