@@ -37,21 +37,6 @@ void ControlMotors::moveForward(int speed)
 {
     if (speed >= 0 && speed <= 255)
     {
-        analogWrite(m1_1, speed);
-        analogWrite(m1_2, 0);
-        analogWrite(m2_1, speed);
-        analogWrite(m2_2, 0);
-        analogWrite(m3_1, speed);
-        analogWrite(m3_2, 0);
-        analogWrite(m4_1, speed);
-        analogWrite(m4_2, 0);
-    }
-}
-
-void ControlMotors::moveBackward(int speed)
-{
-    if (speed >= 0 && speed <= 255)
-    {
         analogWrite(m1_1, 0);
         analogWrite(m1_2, speed);
         analogWrite(m2_1, 0);
@@ -63,28 +48,43 @@ void ControlMotors::moveBackward(int speed)
     }
 }
 
+void ControlMotors::moveBackward(int speed)
+{
+    if (speed >= 0 && speed <= 255)
+    {
+        analogWrite(m1_1, speed);
+        analogWrite(m1_2, 0);
+        analogWrite(m2_1, speed);
+        analogWrite(m2_2, 0);
+        analogWrite(m3_1, speed);
+        analogWrite(m3_2, 0);
+        analogWrite(m4_1, speed);
+        analogWrite(m4_2, 0);
+    }
+}
+
 void ControlMotors::turnRight()
 {
-    digitalWrite(m1_1, LOW);
-    digitalWrite(m1_2, HIGH);
-    digitalWrite(m2_1, LOW);
-    digitalWrite(m2_2, HIGH);
-    digitalWrite(m3_1, HIGH);
-    digitalWrite(m3_2, LOW);
-    digitalWrite(m4_1, HIGH);
-    digitalWrite(m4_2, LOW);
+    analogWrite(m1_1, HIGH);
+    analogWrite(m1_2, LOW);
+    analogWrite(m2_1, HIGH);
+    analogWrite(m2_2, LOW);
+    analogWrite(m3_1, LOW);
+    analogWrite(m3_2, HIGH);
+    analogWrite(m4_1, LOW);
+    analogWrite(m4_2, HIGH);
 }
 
 void ControlMotors::turnLeft()
 {
-    digitalWrite(m1_1, HIGH);
-    digitalWrite(m1_2, LOW);
-    digitalWrite(m2_1, HIGH);
-    digitalWrite(m2_2, LOW);
-    digitalWrite(m3_1, LOW);
-    digitalWrite(m3_2, HIGH);
-    digitalWrite(m4_1, LOW);
-    digitalWrite(m4_2, HIGH);
+    analogWrite(m1_1, LOW);
+    analogWrite(m1_2, HIGH);
+    analogWrite(m2_1, LOW);
+    analogWrite(m2_2, HIGH);
+    analogWrite(m3_1, HIGH);
+    analogWrite(m3_2, LOW);
+    analogWrite(m4_1, HIGH);
+    analogWrite(m4_2, LOW);
 }
 
 void ControlMotors::stopRobot()
@@ -115,17 +115,17 @@ void ControlMotors::moveLeftSide(int speed) // 車体左側のモーター二つ
 {
     if (speed >= 0 && speed <= 255)
     {
-        analogWrite(m3_1, speed);
-        analogWrite(m3_2, 0);
-        analogWrite(m4_1, speed);
-        analogWrite(m4_2, 0);
+        analogWrite(m3_1, 0);
+        analogWrite(m3_2, speed);
+        analogWrite(m4_1, 0);
+        analogWrite(m4_2, speed);
     }
     else if (speed >= -255)
     {
-        analogWrite(m3_1, 0);
-        analogWrite(m3_2, -speed);
-        analogWrite(m4_1, 0);
-        analogWrite(m4_2, -speed);
+        analogWrite(m3_1, -speed);
+        analogWrite(m3_2, 0);
+        analogWrite(m4_1, -speed);
+        analogWrite(m4_2, 0);
     }
 }
 
@@ -133,17 +133,17 @@ void ControlMotors::moveRightSide(int speed) // 車体右側のモーター二�
 {
     if (speed >= 0 && speed <= 255)
     {
-        analogWrite(m1_1, speed);
-        analogWrite(m1_2, 0);
-        analogWrite(m2_1, speed);
-        analogWrite(m2_2, 0);
+        analogWrite(m1_1, 0);
+        analogWrite(m1_2, speed);
+        analogWrite(m2_1, 0);
+        analogWrite(m2_2, speed);
     }
     else if (speed >= -255)
     {
-        analogWrite(m1_1, 0);
-        analogWrite(m1_2, -speed);
-        analogWrite(m2_1, 0);
-        analogWrite(m2_2, -speed);
+        analogWrite(m1_1, -speed);
+        analogWrite(m1_2, 0);
+        analogWrite(m2_1, -speed);
+        analogWrite(m2_2, 0);
     }
 }
 
