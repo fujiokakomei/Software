@@ -5,7 +5,7 @@
 namespace sensors
 {
 
-#define TCA_ADDR 0x70 // SDA1/SCL1(Wire1)上のTCA9548A
+#define TCA_ADDR 0x70 // SDA/SCL(Wire)上のTCA9548A
 
 enum class ColorTile
 {

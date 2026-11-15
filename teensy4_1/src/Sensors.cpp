@@ -9,7 +9,7 @@
 /*
     Front
 
-    D2 --- D1 --- D0
+    D5 --- D6 --- D7
     Left  Center Right
 */
 
@@ -30,9 +30,9 @@ constexpr uint16_t kSilverClearThreshold = 500;
 constexpr float kSilverLuxThreshold = 30.0f;
 constexpr float kSilverBalanceRatio = 1.2f;
 
-constexpr uint8_t kRightFrontDistance = 0;
-constexpr uint8_t kCenterFrontDistance = 1;
-constexpr uint8_t kLeftFrontDistance = 2;
+constexpr uint8_t kRightFrontDistance = 7;
+constexpr uint8_t kCenterFrontDistance = 6;
+constexpr uint8_t kLeftFrontDistance = 5;
 
 float normalizeYaw360(float yaw)
 {
@@ -113,15 +113,15 @@ void SensorManager::tcaSelect(uint8_t ch)
     {
         return;
     }
-    Wire1.beginTransmission(TCA_ADDR);
-    Wire1.write(1 << ch);
-    Wire1.endTransmission();
+    Wire.beginTransmission(TCA_ADDR);
+    Wire.write(1 << ch);
+    Wire.endTransmission();
 }
 
 void SensorManager::tcaDisable() {
-  Wire1.beginTransmission(TCA_ADDR);
-  Wire1.write(0x00);
-  Wire1.endTransmission();
+  Wire.beginTransmission(TCA_ADDR);
+  Wire.write(0x00);
+  Wire.endTransmission();
 }
 
 
@@ -143,10 +143,10 @@ bool SensorManager::setupSensors(int led_pin)
     digitalWrite(led_pin, HIGH);
 
 
-    Wire.begin();  // SDA/SCL: BNO055
-    Wire.setClock(400000); // I2Cのクロックを400kHzに設定
-    Wire1.begin(); // SDA1/SCL1: TCA9548A配下のVL53L0X/TCS34725
-    Wire1.setClock(400000); // I2C1のクロックを400kHzに設定
+    Wire1.begin();  // SDA/SCL: BNO055
+    Wire1.setClock(400000); // I2Cのクロックを400kHzに設定
+    Wire.begin(); // SDA1/SCL1: TCA9548A配下のVL53L0X/TCS34725
+    Wire.setClock(400000); // I2C1のクロックを400kHzに設定
 
     bool allVl53Ready = true;
     for (uint8_t i = 0; i < kVl53Count; i++) // Ch.0〜2の距離センサーを初期化
