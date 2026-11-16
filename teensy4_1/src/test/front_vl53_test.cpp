@@ -109,10 +109,13 @@ float readDistance(uint8_t sensor)
 void setup()
 {
     pinMode(13, OUTPUT);
+    digitalWrite(13, LOW);
+    delay(100);
     digitalWrite(13, HIGH);
 
     Serial.begin(115200);
-    delay(100);
+    Serial.print("start");
+    delay(2000);
     Serial.println();
     Serial.println("=== Front VL53L0X debug test ===");
     Serial.print("I2C: TCA9548A=0x");
