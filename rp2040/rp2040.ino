@@ -8,6 +8,11 @@ constexpr uint8_t PCA9555_ADDR = 0x20; // PCA9555のI2Cアドレス（設定に�
 constexpr uint8_t FRAME_HEADER[] = {'V', 'L'};
 constexpr size_t PAYLOAD_SIZE = SENSOR_COUNT * sizeof(uint16_t);
 
+// 使用しないVL53L0Xの番号（0始まり）をここに記入する。
+// 例: センサー2番と7番を使用しない場合は {2, 7} に変更する。
+// 未使用センサーがない場合は、範囲外のSENSOR_COUNTを残す。
+constexpr uint8_t UNUSED_SENSOR_NUMBERS[] = {4, 5, 7, 8};
+
 // VL53L0Xオブジェクトの配列
 Adafruit_VL53L0X lox[SENSOR_COUNT];
 
@@ -19,6 +24,15 @@ const uint8_t sensor_addresses[SENSOR_COUNT] = {
 
 // 距離データを格納する配列
 uint16_t distance_data[SENSOR_COUNT];
+
+bool isUnusedSensor(uint8_t sensor_number) {
+    for (uint8_t unused_sensor_number : UNUSED_SENSOR_NUMBERS) {
+        if (sensor_number == unused_sensor_number) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // PCA9555の出力を設定する関数 (16ビット分)
 void setPCA9555Outputs(uint16_t pin_states) {
@@ -84,18 +98,22 @@ void setup() {
     setPCA9555Outputs(0x0000); 
     delay(10);
 
-    // 2. 1つずつセンサーを起動し、アドレスを再割り当て
-    for (int i = 0; i < SENSOR_COUNT; i++) {
+    // 2. 使用するセンサーだけを1つずつ起動し、アドレスを再割り当て
+    uint16_t active_sensor_mask = 0;
+    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+        if (isUnusedSensor(i)) {
+            // 未使用センサーはXSHUTをLOWのままにし、初期化しない。
+            distance_data[i] = 0;
+            continue;
+        }
+
         Serial.print("Initializing sensor ");
         Serial.println(i);
 
         // 対象のセンサーのXSHUTだけをHIGH
-        // (例: i=0 のときは 0x0001, i=1 のときは 0x0003 と累積させていく)
-        uint16_t current_mask = 0;
-        for(int j = 0; j <= i; j++) {
-            current_mask |= (1 << j);
-        }
-        setPCA9555Outputs(current_mask);
+        // 初期化済みの使用センサーもHIGHのまま維持する。
+        active_sensor_mask |= static_cast<uint16_t>(1u << i);
+        setPCA9555Outputs(active_sensor_mask);
         delay(10); // 起動を待つ
 
         // 初期アドレス(0x29)でライブラリを初期化、新しいアドレスを設定
@@ -109,12 +127,18 @@ void setup() {
         lox[i].startRangeContinuous();
     }
 
-    Serial.println("All sensors initialized successfully.");
+    Serial.println("All active sensors initialized successfully.");
 }
 
 void loop() {
     // 各センサーからデータを取得
-    for (int i = 0; i < SENSOR_COUNT; i++) {
+    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+        if (isUnusedSensor(i)) {
+            // Teensyへ送る未使用センサー分の値は常に0にする。
+            distance_data[i] = 0;
+            continue;
+        }
+
         if (lox[i].isRangeComplete()) {
             distance_data[i] = lox[i].readRangeResult();
         } else {
@@ -127,7 +151,7 @@ void loop() {
     sendDistanceFrame();
 
     // デバッグ用にUSBシリアルにも表示
-    for (int i = 0; i < SENSOR_COUNT; i++) {
+    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
         Serial.print(distance_data[i]);
         Serial.print("\t");
     }
