@@ -11,7 +11,7 @@ constexpr size_t PAYLOAD_SIZE = SENSOR_COUNT * sizeof(uint16_t);
 // 使用しないVL53L0Xの番号（0始まり）をここに記入する。
 // 例: センサー2番と7番を使用しない場合は {2, 7} に変更する。
 // 未使用センサーがない場合は、範囲外のSENSOR_COUNTを残す。
-constexpr uint8_t UNUSED_SENSOR_NUMBERS[] = {4, 5, 7, 8};
+constexpr uint8_t UNUSED_SENSOR_NUMBERS[] = {SENSOR_COUNT};
 
 // VL53L0Xオブジェクトの配列
 Adafruit_VL53L0X lox[SENSOR_COUNT];
@@ -135,7 +135,7 @@ void loop() {
     for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
         if (isUnusedSensor(i)) {
             // Teensyへ送る未使用センサー分の値は常に0にする。
-            distance_data[i] = 0;
+            distance_data[i] = 11;
             continue;
         }
 

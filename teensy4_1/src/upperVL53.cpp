@@ -14,11 +14,23 @@ uint8_t UpperVL53s::crc8(const uint8_t* data, size_t len)
     return crc;
 }
 
-bool UpperVL53s::receiveDistance(uint16_t out[NUM_SENSORS])
+bool UpperVL53s::receiveDistance(uint16_t out[NUM_SENSORS], ReceiveDebugInfo* debugInfo)
 {
     while (_rp2040.available())
     {
         const uint8_t byte = static_cast<uint8_t>(_rp2040.read());
+        if (debugInfo != nullptr)
+        {
+            ++debugInfo->bytesRead;
+            if (debugInfo->rawDataSize < DEBUG_RAW_DATA_SIZE)
+            {
+                debugInfo->rawData[debugInfo->rawDataSize++] = byte;
+            }
+            else
+            {
+                debugInfo->rawDataTruncated = true;
+            }
+        }
 
         switch (_receiveState)
         {
@@ -53,6 +65,10 @@ bool UpperVL53s::receiveDistance(uint16_t out[NUM_SENSORS])
             _receiveState = ReceiveState::WaitForV;
             if (crc8(_payload, PAYLOAD_SIZE) == byte)
             {
+                if (debugInfo != nullptr)
+                {
+                    ++debugInfo->validFrames;
+                }
                 for (size_t i = 0; i < NUM_SENSORS; ++i)
                 {
                     out[i] = static_cast<uint16_t>(_payload[i * 2]) |
@@ -60,18 +76,26 @@ bool UpperVL53s::receiveDistance(uint16_t out[NUM_SENSORS])
                 }
                 return true;
             }
+            if (debugInfo != nullptr)
+            {
+                ++debugInfo->checksumErrors;
+            }
             break;
         }
     }
     return false;
 }
 
-void UpperVL53s::getVL53s(uint16_t _distance_data[NUM_SENSORS])
+void UpperVL53s::getVL53s(uint16_t _distance_data[NUM_SENSORS], ReceiveDebugInfo* debugInfo)
 {
     uint16_t received[NUM_SENSORS];
+    if (debugInfo != nullptr)
+    {
+        *debugInfo = {};
+    }
 
     // 到着済みの完全なフレームをすべて処理し、最後に検証できた値を保持する。
-    while (receiveDistance(received))
+    while (receiveDistance(received, debugInfo))
     {
         memcpy(distance_data, received, PAYLOAD_SIZE);
     }
