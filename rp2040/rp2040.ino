@@ -1,5 +1,6 @@
 #include <Wire.h>
 #include <Adafruit_VL53L0X.h>
+#include <PCA95x5.h>
 
 #include <Arduino.h>
 
@@ -8,10 +9,13 @@ constexpr uint8_t PCA9555_ADDR = 0x20; // PCA9555のI2Cアドレス（設定に�
 constexpr uint8_t FRAME_HEADER[] = {'V', 'L'};
 constexpr size_t PAYLOAD_SIZE = SENSOR_COUNT * sizeof(uint16_t);
 
+// hideakitai/PCA95x5ライブラリでPCA9555を制御する。
+PCA9555 ioex;
+
 // 使用しないVL53L0Xの番号（0始まり）をここに記入する。
 // 例: センサー2番と7番を使用しない場合は {2, 7} に変更する。
 // 未使用センサーがない場合は、範囲外のSENSOR_COUNTを残す。
-constexpr uint8_t UNUSED_SENSOR_NUMBERS[] = {SENSOR_COUNT};
+constexpr uint8_t UNUSED_SENSOR_NUMBERS[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11};
 
 // VL53L0Xオブジェクトの配列
 Adafruit_VL53L0X lox[SENSOR_COUNT];
@@ -35,21 +39,16 @@ bool isUnusedSensor(uint8_t sensor_number) {
 }
 
 // PCA9555の出力を設定する関数 (16ビット分)
-void setPCA9555Outputs(uint16_t pin_states) {
-    Wire.beginTransmission(PCA9555_ADDR);
-    Wire.write(0x02); // Output Port 0 レジスタアドレス
-    Wire.write(pin_states & 0xFF);        // Port 0 (ビット0-7)
-    Wire.write((pin_states >> 8) & 0xFF); // Port 1 (ビット8-15)
-    Wire.endTransmission();
+bool setPCA9555Outputs(uint16_t pin_states) {
+    return ioex.write(pin_states);
 }
 
-// PCA9555のピン方向を「出力」に設定する関数
-void initPCA9555() {
-    Wire.beginTransmission(PCA9555_ADDR);
-    Wire.write(0x06); // Configuration Port 0 レジスタアドレス
-    Wire.write(0x00); // すべて出力設定 (Port 0)
-    Wire.write(0x00); // すべて出力設定 (Port 1)
-    Wire.endTransmission();
+// PCA9555を初期化し、全ピンを出力に設定する。
+bool initPCA9555() {
+    ioex.attach(Wire, PCA9555_ADDR);
+    return ioex.polarity(PCA95x5::Polarity::ORIGINAL_ALL) &&
+           ioex.direction(PCA95x5::Direction::OUT_ALL) &&
+           ioex.write(PCA95x5::Level::L_ALL);
 }
 
 uint8_t crc8(const uint8_t *data, size_t len)
@@ -91,11 +90,19 @@ void setup() {
     Wire.setClock(400000); // I2C高速モード (400kHz)
 
     Serial.println("Initializing PCA9555...");
-    initPCA9555();
+    if (!initPCA9555()) {
+        Serial.print("Failed to initialize PCA9555 (I2C error: ");
+        Serial.print(ioex.i2c_error());
+        Serial.println(")");
+        while (1);
+    }
 
     // 1. すべてのVL53をシャットダウン (XSHUT = LOW)
     // PCA9555のピン0〜11にXSHUTが接続されていると仮定
-    setPCA9555Outputs(0x0000); 
+    if (!setPCA9555Outputs(PCA95x5::Level::L_ALL)) {
+        Serial.println("Failed to shut down VL53L0X sensors.");
+        while (1);
+    }
     delay(10);
 
     // 2. 使用するセンサーだけを1つずつ起動し、アドレスを再割り当て
@@ -113,7 +120,11 @@ void setup() {
         // 対象のセンサーのXSHUTだけをHIGH
         // 初期化済みの使用センサーもHIGHのまま維持する。
         active_sensor_mask |= static_cast<uint16_t>(1u << i);
-        setPCA9555Outputs(active_sensor_mask);
+        if (!setPCA9555Outputs(active_sensor_mask)) {
+            Serial.print("Failed to enable sensor ");
+            Serial.println(i);
+            while (1);
+        }
         delay(10); // 起動を待つ
 
         // 初期アドレス(0x29)でライブラリを初期化、新しいアドレスを設定
