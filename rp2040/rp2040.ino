@@ -6,8 +6,8 @@
 
 constexpr uint8_t SENSOR_COUNT = 12;
 constexpr uint8_t PCA9555_ADDR = 0x20; // PCA9555のI2Cアドレス（設定に合わせて変更してください）
-constexpr uint8_t FRAME_HEADER[] = {'V', 'L'};
-constexpr size_t PAYLOAD_SIZE = SENSOR_COUNT * sizeof(uint16_t);
+constexpr uint32_t USB_SERIAL_BAUD = 115200;
+constexpr uint32_t USB_SERIAL_WAIT_MS = 2000;
 
 // hideakitai/PCA95x5ライブラリでPCA9555を制御する。
 PCA9555 ioex;
@@ -51,39 +51,26 @@ bool initPCA9555() {
            ioex.write(PCA95x5::Level::L_ALL);
 }
 
-uint8_t crc8(const uint8_t *data, size_t len)
+// PCへUSBシリアルで送るテスト用のCSV形式:
+// VL,<sensor 0の距離>,...,<sensor 11の距離>\n
+void sendDistanceLine()
 {
-    uint8_t crc = 0x00;
-    for (size_t i = 0; i < len; i++)
-    {
-        crc ^= data[i];
-        for (uint8_t b = 0; b < 8; b++)
-            crc = (crc & 0x80) ? (crc << 1) ^ 0x07 : (crc << 1);
+    Serial.print(F("VL"));
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+        Serial.print(',');
+        Serial.print(distance_data[i]);
     }
-    return crc;
-}
-
-void sendDistanceFrame()
-{
-    // フレーム形式: 'V', 'L', 距離データ(12個 x 16 bit, little endian), CRC-8
-    uint8_t payload[PAYLOAD_SIZE];
-    for (uint8_t i = 0; i < SENSOR_COUNT; ++i)
-    {
-        payload[i * 2] = static_cast<uint8_t>(distance_data[i] & 0xFF);
-        payload[i * 2 + 1] = static_cast<uint8_t>(distance_data[i] >> 8);
-    }
-
-    Serial1.write(FRAME_HEADER, sizeof(FRAME_HEADER));
-    Serial1.write(payload, sizeof(payload));
-    Serial1.write(crc8(payload, sizeof(payload)));
+    Serial.println();
 }
 
 void setup() {
-    // デバッグ用USBシリアル
-    Serial.begin(115200);
-    
-    // 相手側マイコン通信用シリアル (XIAO RP2040のSerial1: TX=D7, RX=D8)
-    Serial1.begin(115200); 
+    // PCとのUSBシリアル通信。ボーレートはPC側の設定用で、USB通信速度自体には影響しない。
+    Serial.begin(USB_SERIAL_BAUD);
+    const uint32_t serialWaitStartedAt = millis();
+    while (!Serial && millis() - serialWaitStartedAt < USB_SERIAL_WAIT_MS) {
+    }
+    Serial.println(F("RP2040 VL53L0X USB test started"));
+    Serial.println(F("Format: VL,<sensor0>,...,<sensor11>"));
 
     // I2Cバスの初期化 (標準ピンを使用)
     Wire.begin();
@@ -114,6 +101,7 @@ void setup() {
             continue;
         }
 
+        delay(1000);
         Serial.print("Initializing sensor ");
         Serial.println(i);
 
@@ -125,7 +113,7 @@ void setup() {
             Serial.println(i);
             while (1);
         }
-        delay(10); // 起動を待つ
+        delay(1000); // 起動を待つ
 
         // 初期アドレス(0x29)でライブラリを初期化、新しいアドレスを設定
         if (!lox[i].begin(sensor_addresses[i], false, &Wire)) {
@@ -145,7 +133,7 @@ void loop() {
     // 各センサーからデータを取得
     for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
         if (isUnusedSensor(i)) {
-            // Teensyへ送る未使用センサー分の値は常に0にする。
+            // 未使用センサー分には固定値を送る。
             distance_data[i] = 11;
             continue;
         }
@@ -158,15 +146,8 @@ void loop() {
         }
     }
 
-    // 別のマイコンへ距離データをフレーム化して送信
-    sendDistanceFrame();
-
-    // デバッグ用にUSBシリアルにも表示
-    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
-        Serial.print(distance_data[i]);
-        Serial.print("\t");
-    }
-    Serial.println();
+    // PCへ距離データをUSBシリアルで送信
+    sendDistanceLine();
 
     delay(50); // 送信頻度の調整 (ミリ秒)
 }
