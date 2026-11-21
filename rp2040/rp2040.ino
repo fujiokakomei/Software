@@ -15,7 +15,7 @@ PCA9555 ioex;
 // 使用しないVL53L0Xの番号（0始まり）をここに記入する。
 // 例: センサー2番と7番を使用しない場合は {2, 7} に変更する。
 // 未使用センサーがない場合は、範囲外のSENSOR_COUNTを残す。
-constexpr uint8_t UNUSED_SENSOR_NUMBERS[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11};
+constexpr uint8_t UNUSED_SENSOR_NUMBERS[] = {SENSOR_COUNT};
 
 // VL53L0Xオブジェクトの配列
 Adafruit_VL53L0X lox[SENSOR_COUNT];
@@ -74,7 +74,7 @@ void setup() {
 
     // I2Cバスの初期化 (標準ピンを使用)
     Wire.begin();
-    Wire.setClock(400000); // I2C高速モード (400kHz)
+    //Wire.setClock(400000); // I2C高速モード (400kHz)
 
     Serial.println("Initializing PCA9555...");
     if (!initPCA9555()) {
@@ -134,7 +134,7 @@ void loop() {
     for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
         if (isUnusedSensor(i)) {
             // 未使用センサー分には固定値を送る。
-            distance_data[i] = 11;
+            distance_data[i] = 0;
             continue;
         }
 
