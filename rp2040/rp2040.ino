@@ -1,17 +1,17 @@
 #include <Wire.h>
 #include <Adafruit_VL53L0X.h>
+#include <PCA95x5.h>
 
 #include <Arduino.h>
 
 constexpr uint8_t SENSOR_COUNT = 12;
-constexpr uint8_t PCA9555_ADDR = 0x20; // PCA9555のI2Cアドレス（設定に合わせて変更してください）
-constexpr uint8_t FRAME_HEADER[] = {'V', 'L'};
-constexpr size_t PAYLOAD_SIZE = SENSOR_COUNT * sizeof(uint16_t);
+constexpr uint8_t PCA9555_ADDR = 0x20;
+constexpr uint32_t USB_SERIAL_BAUD = 115200;
+constexpr uint32_t USB_SERIAL_WAIT_MS = 2000;
 
-// 使用しないVL53L0Xの番号（0始まり）をここに記入する。
-// 例: センサー2番と7番を使用しない場合は {2, 7} に変更する。
-// 未使用センサーがない場合は、範囲外のSENSOR_COUNTを残す。
-constexpr uint8_t UNUSED_SENSOR_NUMBERS[] = {SENSOR_COUNT};
+PCA9555 ioex;
+
+constexpr uint8_t UNUSED_SENSOR_NUMBERS[] = {SENSOR_COUNT}; //未使用なし
 
 // VL53L0Xオブジェクトの配列
 Adafruit_VL53L0X lox[SENSOR_COUNT];
@@ -22,7 +22,6 @@ const uint8_t sensor_addresses[SENSOR_COUNT] = {
     0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B
 };
 
-// 距離データを格納する配列
 uint16_t distance_data[SENSOR_COUNT];
 
 bool isUnusedSensor(uint8_t sensor_number) {
@@ -35,22 +34,18 @@ bool isUnusedSensor(uint8_t sensor_number) {
 }
 
 // PCA9555の出力を設定する関数 (16ビット分)
-void setPCA9555Outputs(uint16_t pin_states) {
-    Wire.beginTransmission(PCA9555_ADDR);
-    Wire.write(0x02); // Output Port 0 レジスタアドレス
-    Wire.write(pin_states & 0xFF);        // Port 0 (ビット0-7)
-    Wire.write((pin_states >> 8) & 0xFF); // Port 1 (ビット8-15)
-    Wire.endTransmission();
+bool setPCA9555Outputs(uint16_t pin_states) {
+    return ioex.write(pin_states);
 }
 
-// PCA9555のピン方向を「出力」に設定する関数
-void initPCA9555() {
-    Wire.beginTransmission(PCA9555_ADDR);
-    Wire.write(0x06); // Configuration Port 0 レジスタアドレス
-    Wire.write(0x00); // すべて出力設定 (Port 0)
-    Wire.write(0x00); // すべて出力設定 (Port 1)
-    Wire.endTransmission();
+// PCA9555を初期化し、全ピンを出力に設定する。
+bool initPCA9555() {
+    ioex.attach(Wire, PCA9555_ADDR);
+    return ioex.polarity(PCA95x5::Polarity::ORIGINAL_ALL) &&
+           ioex.direction(PCA95x5::Direction::OUT_ALL) &&
+           ioex.write(PCA95x5::Level::L_ALL);
 }
+
 
 uint8_t crc8(const uint8_t *data, size_t len)
 {
@@ -79,63 +74,68 @@ void sendDistanceFrame()
     Serial1.write(crc8(payload, sizeof(payload)));
 }
 
-void setup() {
-    // デバッグ用USBシリアル
-    Serial.begin(115200);
-    
-    // 相手側マイコン通信用シリアル (XIAO RP2040のSerial1: TX=D7, RX=D8)
+void setup() {    
     Serial1.begin(115200); 
 
-    // I2Cバスの初期化 (標準ピンを使用)
     Wire.begin();
-    Wire.setClock(400000); // I2C高速モード (400kHz)
 
-    Serial.println("Initializing PCA9555...");
-    initPCA9555();
+    if (!initPCA9555()) {
+        Serial1.print("Failed to initialize PCA9555 (I2C error: ");
+        Serial1.print(ioex.i2c_error());
+        Serial1.println(")");
+        while (1);
+    }
 
-    // 1. すべてのVL53をシャットダウン (XSHUT = LOW)
-    // PCA9555のピン0〜11にXSHUTが接続されていると仮定
-    setPCA9555Outputs(0x0000); 
+    // shut down
+    if (!setPCA9555Outputs(PCA95x5::Level::L_ALL))
+    {
+        Serial1.println("Failed to shut down VL53L0X sensors.");
+        while (1);
+    }
     delay(10);
 
-    // 2. 使用するセンサーだけを1つずつ起動し、アドレスを再割り当て
+    // address setting
     uint16_t active_sensor_mask = 0;
-    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
-        if (isUnusedSensor(i)) {
-            // 未使用センサーはXSHUTをLOWのままにし、初期化しない。
+    for (uint8_t i = 0; i < SENSOR_COUNT; i++)
+    {
+        if (isUnusedSensor(i))
+        {
             distance_data[i] = 0;
             continue;
         }
 
-        Serial.print("Initializing sensor ");
-        Serial.println(i);
+        delay(1000);
+        Serial1.print("Initializing sensor ");
+        Serial1.println(i);
 
-        // 対象のセンサーのXSHUTだけをHIGH
-        // 初期化済みの使用センサーもHIGHのまま維持する。
         active_sensor_mask |= static_cast<uint16_t>(1u << i);
-        setPCA9555Outputs(active_sensor_mask);
-        delay(10); // 起動を待つ
+        if (!setPCA9555Outputs(active_sensor_mask))
+        {
+            Serial1.print("Failed to enable sensor ");
+            Serial1.println(i);
+            while (1);
+        }
+        delay(1000);
 
-        // 初期アドレス(0x29)でライブラリを初期化、新しいアドレスを設定
-        if (!lox[i].begin(sensor_addresses[i], false, &Wire)) {
-            Serial.print("Failed to boot VL53L0X #");
-            Serial.println(i);
-            while (1); // 起動失敗時は停止
+        if (!lox[i].begin(sensor_addresses[i], false, &Wire))
+        {
+            Serial1.print("Failed to boot VL53L0X #");
+            Serial1.println(i);
+            while (1);
         }
         
-        // 連続測定モードを開始
+        // 連続測定モード
         lox[i].startRangeContinuous();
     }
 
-    Serial.println("All active sensors initialized successfully.");
+    Serial1.println("All active sensors initialized successfully.");
 }
 
 void loop() {
-    // 各センサーからデータを取得
     for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
         if (isUnusedSensor(i)) {
-            // Teensyへ送る未使用センサー分の値は常に0にする。
-            distance_data[i] = 11;
+            // 未使用センサー（ピンは物理的に抜け）
+            distance_data[i] = 0;
             continue;
         }
 
@@ -143,19 +143,12 @@ void loop() {
             distance_data[i] = lox[i].readRangeResult();
         } else {
             // 測定が完了していない場合は前回の値を維持、またはエラー値
-            // distance_data[i] = 0; 
+            // distance_data[i] = 0; 前回のままにしてる
         }
     }
 
-    // 別のマイコンへ距離データをフレーム化して送信
+    // to teensy
     sendDistanceFrame();
 
-    // デバッグ用にUSBシリアルにも表示
-    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
-        Serial.print(distance_data[i]);
-        Serial.print("\t");
-    }
-    Serial.println();
-
-    delay(50); // 送信頻度の調整 (ミリ秒)
+    delay(50);
 }
