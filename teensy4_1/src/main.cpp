@@ -60,7 +60,7 @@ sensors::SensorManager sensorManager;
 uppervl53s::UpperVL53s upperVL53s(Serial8);
 
 
-walls::Walls checkWalls(upperVL53s, sensorManager);
+walls::Walls checkWalls(upperVL53s);
 
 
 controlrobot::ControlRobot controlRobot(

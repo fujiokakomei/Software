@@ -1,7 +1,6 @@
 #include "Sensors.hpp"
 
 #include <Wire.h>
-#include <Adafruit_VL53L0X.h>
 #include <Adafruit_TCS34725.h>
 #include <Adafruit_BNO055.h>
 #include <Adafruit_Sensor.h>
@@ -19,9 +18,6 @@ namespace sensors
 namespace
 {
 
-constexpr uint8_t kVl53Count = 3;
-constexpr uint16_t kVl53ContinuousPeriodMs = 30;
-constexpr float kInvalidDistanceMm = -1.0f;
 constexpr unsigned long kGyroCalibrationTimeoutMs = 15000;
 constexpr uint16_t kBlackClearThreshold = 120;
 constexpr float kBlackLuxThreshold = 5.0f;
@@ -29,10 +25,6 @@ constexpr float kColorDominanceRatio = 1.3f;
 constexpr uint16_t kSilverClearThreshold = 500;
 constexpr float kSilverLuxThreshold = 30.0f;
 constexpr float kSilverBalanceRatio = 1.2f;
-
-constexpr uint8_t kRightFrontDistance = 0;
-constexpr uint8_t kCenterFrontDistance = 1;
-constexpr uint8_t kLeftFrontDistance = 2;
 
 float normalizeYaw360(float yaw)
 {
@@ -47,88 +39,12 @@ float normalizeYaw360(float yaw)
     return yaw;
 }
 
-Adafruit_VL53L0X vl[kVl53Count];                 // Ch.0〜2
-float vlDistanceMm[kVl53Count] = {
-    kInvalidDistanceMm,
-    kInvalidDistanceMm,
-    kInvalidDistanceMm
-};
-bool vlAvailable[kVl53Count] = {};
-
-bool updateVl53Distance(uint8_t ch)
-{
-    if (ch >= kVl53Count)
-    {
-        return false;
-    }
-
-    SensorManager::tcaSelect(ch);
-    if (vl[ch].isRangeComplete())
-    {
-        const uint16_t distanceMm = vl[ch].readRangeResult();
-        if (!vl[ch].timeoutOccurred() && distanceMm < 8190)
-        {
-            vlDistanceMm[ch] = static_cast<float>(distanceMm);
-            vlAvailable[ch] = true;
-        }
-        else
-        {
-            vlDistanceMm[ch] = kInvalidDistanceMm;
-            vlAvailable[ch] = false;
-        }
-    }
-    SensorManager::tcaDisable();
-
-    return vlAvailable[ch];
-}
-
-float readVl53Distance(uint8_t ch)
-{
-    updateVl53Distance(ch);
-    return vlDistanceMm[ch];
-}
-
-float averageFrontDistance()
-{
-    float totalDistanceMm = 0.0f;
-    uint8_t availableCount = 0;
-
-    for (uint8_t i = 0; i < kVl53Count; i++)
-    {
-        if (updateVl53Distance(i))
-        {
-            totalDistanceMm += vlDistanceMm[i];
-            availableCount++;
-        }
-    }
-
-    return availableCount > 0 ? totalDistanceMm / availableCount : kInvalidDistanceMm;
-}
-
 } // namespace
-
-void SensorManager::tcaSelect(uint8_t ch)
-{
-    if (ch > 7)
-    {
-        return;
-    }
-    Wire1.beginTransmission(TCA_ADDR);
-    Wire1.write(1 << ch);
-    Wire1.endTransmission();
-}
-
-void SensorManager::tcaDisable() {
-  Wire1.beginTransmission(TCA_ADDR);
-  Wire1.write(0x00);
-  Wire1.endTransmission();
-}
-
 
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(
     TCS34725_INTEGRATIONTIME_50MS,
     TCS34725_GAIN_4X
-);                                                 // Ch.3
+);
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire); // SDA/SCLに直結 (ADR→GND)
 
 bool SensorManager::setupSensors(int led_pin)
@@ -143,34 +59,11 @@ bool SensorManager::setupSensors(int led_pin)
     digitalWrite(led_pin, HIGH);
 
 
-    Wire.begin();  // SDA/SCL: BNO055
+    Wire.begin();  // SDA/SCL: TCS34725 / BNO055
     Wire.setClock(400000); // I2Cのクロックを400kHzに設定
-    Wire1.begin(); // SDA1/SCL1: TCA9548A配下のVL53L0X/TCS34725
-    Wire1.setClock(400000); // I2C1のクロックを400kHzに設定
 
-    bool allVl53Ready = true;
-    for (uint8_t i = 0; i < kVl53Count; i++) // Ch.0〜2の距離センサーを初期化
-    {
-        SensorManager::tcaSelect(i);
-        if (vl[i].begin(VL53L0X_I2C_ADDR, false, &Wire1))
-        {
-            vl[i].startRangeContinuous(kVl53ContinuousPeriodMs);
-            vlDistanceMm[i] = kInvalidDistanceMm;
-            vlAvailable[i] = false;
-        }
-        else
-        {
-            allVl53Ready = false;
-            vlDistanceMm[i] = kInvalidDistanceMm;
-            vlAvailable[i] = false;
-        }
-    }
-
-    SensorManager::tcaSelect(3); // Ch.3のカラーセンサーを初期化
-    _tcsReady = tcs.begin(TCS34725_ADDRESS, &Wire1);
-
-    SensorManager::tcaDisable(); // TCAを無効化
-    if (!allVl53Ready || !_tcsReady)
+    _tcsReady = tcs.begin(TCS34725_ADDRESS, &Wire);
+    if (!_tcsReady)
     {
         digitalWrite(led_pin, LOW);
         return false;
@@ -205,53 +98,6 @@ bool SensorManager::isReady() const
     return _isReady;
 }
 
-float SensorManager::readRightDistance()
-{
-    return readRightFrontDistance();
-}
-float SensorManager::readLeftDistance()
-{
-    return readLeftFrontDistance();
-}
-float SensorManager::readFrontDistance()
-{
-    return averageFrontDistance();
-}
-
-/*
-float SensorManager::readBackDistance()
-{
-    return kInvalidDistanceMm;
-}
-*/
-
-float SensorManager::readRightFrontDistance()
-{
-    return readVl53Distance(kRightFrontDistance);
-}
-
-float SensorManager::readCenterFrontDistance()
-{
-    return readVl53Distance(kCenterFrontDistance);
-}
-
-float SensorManager::readLeftFrontDistance()
-{
-    return readVl53Distance(kLeftFrontDistance);
-}
-
-/*
-float SensorManager::readRightBackDistance()
-{
-    return kInvalidDistanceMm;
-}
-
-float SensorManager::readLeftBackDistance()
-{
-    return kInvalidDistanceMm;
-}
-*/
-
 void SensorManager::readColor(uint16_t &r, uint16_t &g, uint16_t &b, uint16_t &c, float &colorTemp, float &lux)
 {
     if (!_tcsReady)
@@ -262,11 +108,9 @@ void SensorManager::readColor(uint16_t &r, uint16_t &g, uint16_t &b, uint16_t &c
         return;
     }
 
-    SensorManager::tcaSelect(3); // Ch.3のカラーセンサーを選択
     tcs.getRawData(&r, &g, &b, &c);
     colorTemp = tcs.calculateColorTemperature_dn40(r, g, b, c);
     lux = tcs.calculateLux(r, g, b);
-    SensorManager::tcaDisable();
 }
 
 ColorTile detectColorTile(SensorManager& sensors)

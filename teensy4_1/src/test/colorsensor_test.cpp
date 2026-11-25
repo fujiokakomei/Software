@@ -1,32 +1,59 @@
 #include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_TCS34725.h>
 
-#include "Sensors.hpp"
+namespace
+{
 
-int ledPinTCS = 40;
-sensors::SensorManager sensorManager;
+constexpr int kTcsLedPin = 40;
+constexpr unsigned long kSampleIntervalMs = 100;
 
-uint16_t r, g, b, c;
-float colorTemp, lux;
+Adafruit_TCS34725 tcs(
+    TCS34725_INTEGRATIONTIME_50MS,
+    TCS34725_GAIN_4X
+);
 
-sensors::ColorTile colorTile;
+void printSensorNotFound()
+{
+    Serial.println("TCS34725 was not found on Wire.");
+    Serial.println("Check SDA, SCL, VIN, GND, and the I2C address.");
+}
+
+} // namespace
 
 void setup()
 {
-    sensorManager.setupSensors(ledPinTCS);
-    delay(500);
-
-    digitalWrite(ledPinTCS, HIGH);
-    delay(1000);
-    digitalWrite(ledPinTCS, LOW);
-    delay(1000);
-    digitalWrite(ledPinTCS, HIGH);
+    pinMode(kTcsLedPin, OUTPUT);
+    digitalWrite(kTcsLedPin, HIGH);
 
     Serial.begin(115200);
+    Wire.begin();
+    Wire.setClock(400000);
+
+    if (!tcs.begin(TCS34725_ADDRESS, &Wire))
+    {
+        printSensorNotFound();
+        digitalWrite(kTcsLedPin, LOW);
+        while (true)
+        {
+            delay(1000);
+        }
+    }
+
+    Serial.println("r,g,b,c,color_temp_k,lux");
 }
 
 void loop()
 {
-    sensorManager.readColor(r, g, b, c, colorTemp, lux);
+    uint16_t r = 0;
+    uint16_t g = 0;
+    uint16_t b = 0;
+    uint16_t c = 0;
+    tcs.getRawData(&r, &g, &b, &c);
+
+    const uint16_t colorTemp = tcs.calculateColorTemperature_dn40(r, g, b, c);
+    const uint16_t lux = tcs.calculateLux(r, g, b);
+
     Serial.print(r);
     Serial.print(", ");
     Serial.print(g);
@@ -39,27 +66,5 @@ void loop()
     Serial.print(", ");
     Serial.println(lux);
 
-    /*
-    colorTile = sensors::detectColorTile(sensorManager);
-    if (colorTile == sensors::ColorTile::None)
-    {
-        Serial.println("None");
-    }
-    else if (colorTile == sensors::ColorTile::Blue)
-    {
-        Serial.println("Blue");
-    }
-    else if (colorTile == sensors::ColorTile::Red)
-    {
-        Serial.println("Red");
-    }
-    else if (colorTile == sensors::ColorTile::Silver)
-    {
-        Serial.println("Silver");
-    }
-    else if (colorTile == sensors::ColorTile::Black)
-    {
-        Serial.println("Black");
-    }
-    */
+    delay(kSampleIntervalMs);
 }

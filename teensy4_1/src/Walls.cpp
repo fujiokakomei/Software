@@ -47,14 +47,8 @@ void Walls::readWall(std::array<bool, 4>& wall)
 int Walls::readFront()
 {
     _vl53s.getVL53s(distance_data);
-    float lowerFrontDistance = _sensors.readCenterFrontDistance();
 
-    if (lowerFrontDistance > frontDownSlopeThresholdLowerSensor)
-    {
-        return 1;
-    }
-
-    if (distance_data[0] < frontSlopeThresholdUpperSensor && distance_data[0] > frontWallThreshold && lowerFrontDistance < frontSlopeThresholdLowerSensor)
+    if (distance_data[0] < frontSlopeThresholdUpperSensor && distance_data[0] > frontWallThreshold)
     {
         return 1;
     }
