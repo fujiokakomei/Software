@@ -27,8 +27,10 @@ void setup()
     digitalWrite(kTcsLedPin, HIGH);
 
     Serial.begin(115200);
+    delay(500);
     Wire.begin();
-    Wire.setClock(400000);
+    //Wire.setClock(400000);
+    delay(500);
 
     if (!tcs.begin(TCS34725_ADDRESS, &Wire))
     {
