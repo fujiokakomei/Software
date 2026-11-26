@@ -97,7 +97,6 @@ RobotState resumeStateAfterPause = RobotState::Searching;
 searchapp::SearchResult searchResult;
 
 std::array<bool, 4> nowWall;
-int frontType;
 
 int moveResult;
 
@@ -209,31 +208,11 @@ bool turnToDirectionOrPause(rcj_maze::Direction targetDirection, RobotState resu
     return false;
 }
 
-// 坂の手前（または上端）から、坂を通過した先の通常セルまで移動する。
-// 呼び出し前に robotPose.dir を、通る坂の方向へ合わせておく。
-bool traverseSlope(RobotState resumeState, bool updateMapAfterTraversal)
+// 坂を通過し終えた後の座標・地図の更新。
+// robotPose は坂の手前（または上端）のセル、robotPose.dir は坂の方向のまま呼ぶ。
+void updatePoseAfterSlope(bool updateMapAfterTraversal)
 {
     const int startFloor = robotPose.floor;
-    bool completed = false;
-
-    if (startFloor == 0)
-    {
-        completed = controlRobot.climbSlope(defaultSpeed, sensorManager.readYaw());
-    }
-    else if (startFloor == 1)
-    {
-        completed = controlRobot.goDownSlope(defaultSpeed, sensorManager.readYaw());
-    }
-    else
-    {
-        pauseForLoP(resumeState);
-        return false;
-    }
-
-    if (pauseAfterMotionIfInterrupted(completed, resumeState))
-    {
-        return false;
-    }
 
     // 坂セルを経由して反対側フロアの通常セルへ移動する。
     mazeMapper.moveForward(robotPose.x, robotPose.y, robotPose.dir);
@@ -251,8 +230,42 @@ bool traverseSlope(RobotState resumeState, bool updateMapAfterTraversal)
         checkWalls.readWall(nowWall);
         mazeMapper.updateMap(robotPose.floor, robotPose.x, robotPose.y, robotPose.dir, nowWall);
     }
+}
 
+// 地図上で分かっている坂を、手前（または上端）から通過した先の通常セルまで移動する。
+// 呼び出し前に robotPose.dir を、通る坂の方向へ合わせておく。
+bool traverseSlope(RobotState resumeState, bool updateMapAfterTraversal)
+{
+    if (robotPose.floor < 0 || robotPose.floor >= rcj_maze::MazeMapper::kFloorCount)
+    {
+        pauseForLoP(resumeState);
+        return false;
+    }
+
+    // 上り・下りはジャイロの傾きで判断する
+    const bool completed = controlRobot.traverseSlope(defaultSpeed, sensorManager.readYaw());
+    if (pauseAfterMotionIfInterrupted(completed, resumeState))
+    {
+        return false;
+    }
+
+    updatePoseAfterSlope(updateMapAfterTraversal);
     return true;
+}
+
+// 前進中にジャイロで坂を検出し、すでに坂を通過し終えたときの処理。
+// 地図上の階は 0 と 1 の2つなので、今いる階から見て反対側の階へつながる坂として登録する。
+void registerDetectedSlope()
+{
+    if (robotPose.floor == 0)
+    {
+        mazeMapper.markRampUp(robotPose.floor, robotPose.x, robotPose.y, robotPose.dir);
+    }
+    else
+    {
+        mazeMapper.markRampDown(robotPose.floor, robotPose.x, robotPose.y, robotPose.dir);
+    }
+    updatePoseAfterSlope(true);
 }
 
 bool moveForward()
@@ -322,6 +335,12 @@ bool moveForward()
         robotPose.x = searchResult.nextX;
         robotPose.y = searchResult.nextY;
         robotPose.dir = searchResult.absoluteDirection;
+        break;
+
+    case controlrobot::ControlRobot::kMoveResultSlope:
+        // 次のタイルが坂だった。坂を抜けた先のタイル中心にいる。
+        robotPose.dir = searchResult.absoluteDirection;
+        registerDetectedSlope();
         break;
 
     case controlrobot::ControlRobot::kMoveResultObstacleSecondNextTile:
@@ -462,11 +481,6 @@ void loop()
             lastCheckpointPose.dir = robotPose.dir;
 
             checkWalls.readWall(nowWall);
-            if (!nowWall[0]) // 前が壁でない
-            {
-                frontType = checkWalls.readFront();
-            }
-
             mazeMapper.updateMap(robotPose.floor, robotPose.x, robotPose.y, robotPose.dir, nowWall); // (0, 0)を作成
 
             isFirstBoot = false;
@@ -504,13 +518,11 @@ void loop()
     {
     case RobotState::Searching:
         checkWalls.readWall(nowWall);
-        if (!nowWall[0]) // 前が壁でない
-        {
-            frontType = checkWalls.readFront(); // 上り坂か下り坂かはrobotPose.floorで判断する
-        }
 
         // 次行くとこ決める、今の壁情報はここでupdateMap()される
-        searchResult = _searchApp.decideNextMove(mazeMapper, robotPose, nowWall, frontType);
+        // 坂は事前に距離センサーで推定せず、前進中にジャイロで検出して地図に登録する
+        // （moveForwardOneBlock が kMoveResultSlope を返す）。
+        searchResult = _searchApp.decideNextMove(mazeMapper, robotPose, nowWall, false);
         
         if (!searchResult.finished)
         {
@@ -649,7 +661,8 @@ void loop()
             searchResult.absoluteDirection = targetDirection;
             returnInterrupted = !moveForward();
             if (!returnInterrupted &&
-                moveResult == controlrobot::ControlRobot::kMoveResultObstacleSecondNextTile)
+                (moveResult == controlrobot::ControlRobot::kMoveResultObstacleSecondNextTile ||
+                 moveResult == controlrobot::ControlRobot::kMoveResultSlope))
             {
                 // 予定経路の1マス先まで進んだので、現在位置から帰還経路を作り直す。
                 returnPathNeedsReplan = true;

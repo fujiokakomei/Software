@@ -36,6 +36,8 @@ constexpr unsigned long kTurnTimeoutMs = 5000;
 // 被災者識別・救助キット投下中の停止時間も含むため、通常の一マス走行より長く取る。
 constexpr unsigned long kMoveTimeoutMs = 15000;
 constexpr unsigned long kSlopeTimeoutMs = 10000;
+// 1マス分進み終わった時点で坂かどうか判定途中（傾いている）なら、判定がつくまで延長する時間
+constexpr unsigned long kSlopeResolveTimeoutMs = 1500;
 constexpr unsigned long kGyroCorrectionTimeoutMs = 5000;
 constexpr unsigned long kCameraResponseTimeoutMs = 3000;
 constexpr int kMotionTimeoutResult = -1;
@@ -719,9 +721,12 @@ int ControlRobot::moveForwardOneBlock(
     bool detectedBlueTile = false;
     bool detectedCheckpoint = false;
     const unsigned long motionStartTime = millis();
+    unsigned long slopeResolveStartTime = 0;
+    _slopeDetector.reset();
+    _lastSlopeDirection = 0;
     _rightCam.print("mode a\n");
     _leftCam.print("mode a\n");
-    while(nowDistance > goalDistance)
+    while (true)
     {
         if (stopIfStartButtonInterrupted(_motors))
         {
@@ -731,6 +736,44 @@ int ControlRobot::moveForwardOneBlock(
         {
             _motors.stopRobot();
             return kMotionTimeoutResult;
+        }
+
+        // 坂判定（下部距離センサーは使わず、ジャイロの前後傾きだけで判定する）
+        updateSlopeDetector();
+        if (_slopeDetector.isOnSlope())
+        {
+            const SlopeTraverseResult slopeResult =
+                finishSlopeTraversal(speed, start_yaw, millis());
+            if (slopeResult == SlopeTraverseResult::Finished)
+            {
+                return kMoveResultSlope;
+            }
+            if (slopeResult == SlopeTraverseResult::Failed)
+            {
+                return kMotionTimeoutResult;
+            }
+            // Rejected: 階段などだったので通常の前進を続ける
+            _vl53s.getVL53s(distance_data);
+            nowDistance = distance_data[0];
+        }
+        // 傾いている間はカラーセンサー・障害物回避の判定をしない（坂・階段・バンプ上の誤検出防止）
+        const bool tilted = _slopeDetector.isCandidate() || _slopeDetector.isRejected();
+
+        if (nowDistance <= goalDistance)
+        {
+            // 1マス進んだ。坂の判定途中なら判定がつくまで少しだけ進み続ける。
+            if (!_slopeDetector.isCandidate())
+            {
+                break;
+            }
+            if (slopeResolveStartTime == 0)
+            {
+                slopeResolveStartTime = millis();
+            }
+            if (millis() - slopeResolveStartTime >= kSlopeResolveTimeoutMs)
+            {
+                break;
+            }
         }
 
         const float operation = PID(start_yaw) + wallFollowingOperation();
@@ -746,7 +789,8 @@ int ControlRobot::moveForwardOneBlock(
 
 
         //カラータイル処理
-        const sensors::ColorTile colorTile = sensors::detectColorTile(_sensors);
+        const sensors::ColorTile colorTile =
+            tilted ? sensors::ColorTile::None : sensors::detectColorTile(_sensors);
         if (colorTile == sensors::ColorTile::Blue && !handledBlueTile)
         {
             /* 前進終わってから5秒待つように変更(main.cppで待つ処理する)
@@ -866,6 +910,11 @@ int ControlRobot::moveForwardOneBlock(
             }
         }
 
+        if (tilted)
+        {
+            continue;
+        }
+
         // ロードセル、距離センサー1,11
         // 回避開始前の壁情報を使い、最初のタイル間隔を決める。
         const std::array<bool, 4> wallsBeforeAvoid = wallInformationAtTileCenter(distance_data);
@@ -947,56 +996,17 @@ int ControlRobot::moveForwardOneBlock(
     return 0;
 }
 
-bool ControlRobot::climbSlope(int speed, float start_yaw)
+void ControlRobot::updateSlopeDetector()
 {
-    float yaw = 0.0f;
-    float roll = 0.0f;
-    float pitch = 0.0f;
-    _sensors.readOrientation(yaw, roll, pitch);
-    const unsigned long startTime = millis();
-    while (pitch < 10) // 登り始めるまで
-    {
-        if (stopIfStartButtonInterrupted(_motors))
-        {
-            return false;
-        }
-        if (millis() - startTime >= kSlopeTimeoutMs)
-        {
-            _motors.stopRobot();
-            return false;
-        }
+    float noseUpPitch = 0.0f;
+    float sideRoll = 0.0f;
+    _sensors.readTilt(noseUpPitch, sideRoll);
+    _slopeDetector.update(noseUpPitch, sideRoll, millis());
+}
 
-        const float operation = PID(start_yaw);
-        const int leftSpeed = clampMotorSpeed(speed - operation);
-        const int rightSpeed = clampMotorSpeed(speed + operation);
-
-        _motors.moveLeftSide(leftSpeed);
-        _motors.moveRightSide(rightSpeed);
-
-        _sensors.readOrientation(yaw, roll, pitch);
-    }
-    while (pitch > 3) // 登り終わるまで
-    {
-        if (stopIfStartButtonInterrupted(_motors))
-        {
-            return false;
-        }
-        if (millis() - startTime >= kSlopeTimeoutMs)
-        {
-            _motors.stopRobot();
-            return false;
-        }
-
-        const float operation = PID(start_yaw);
-        const int leftSpeed = clampMotorSpeed(speed - operation);
-        const int rightSpeed = clampMotorSpeed(speed + operation);
-
-        _motors.moveLeftSide(leftSpeed);
-        _motors.moveRightSide(rightSpeed);
-
-        _sensors.readOrientation(yaw, roll, pitch);
-    }
-    // タイルの真ん中まで前進
+bool ControlRobot::moveToTileCenterAfterSlope(int speed, float start_yaw, unsigned long startTime)
+{
+    // 坂を抜けた先のタイルの真ん中まで前進
     _vl53s.getVL53s(distance_data);
     float frontDistance = distance_data[0];
     while (std::fmod(frontDistance, kTileDistanceMm) > kFrontDistanceMm)
@@ -1012,11 +1022,8 @@ bool ControlRobot::climbSlope(int speed, float start_yaw)
         }
 
         const float operation = PID(start_yaw);
-        const int leftSpeed = clampMotorSpeed(speed - operation);
-        const int rightSpeed = clampMotorSpeed(speed + operation);
-
-        _motors.moveLeftSide(leftSpeed);
-        _motors.moveRightSide(rightSpeed);
+        _motors.moveLeftSide(clampMotorSpeed(speed - operation));
+        _motors.moveRightSide(clampMotorSpeed(speed + operation));
 
         _vl53s.getVL53s(distance_data);
         frontDistance = distance_data[0];
@@ -1025,14 +1032,52 @@ bool ControlRobot::climbSlope(int speed, float start_yaw)
     return true;
 }
 
-bool ControlRobot::goDownSlope(int speed, float start_yaw)
+ControlRobot::SlopeTraverseResult ControlRobot::finishSlopeTraversal(
+    int speed, float start_yaw, unsigned long startTime)
 {
-    float yaw = 0.0f;
-    float roll = 0.0f;
-    float pitch = 0.0f;
-    _sensors.readOrientation(yaw, roll, pitch);
+    _lastSlopeDirection = _slopeDetector.direction();
+
+    // 坂を抜けて平地に戻るまで、向きだけPIDで保って前進する。
+    while (!_slopeDetector.isFinished())
+    {
+        if (stopIfStartButtonInterrupted(_motors))
+        {
+            return SlopeTraverseResult::Failed;
+        }
+        if (millis() - startTime >= kSlopeTimeoutMs)
+        {
+            _motors.stopRobot();
+            return SlopeTraverseResult::Failed;
+        }
+
+        const float operation = PID(start_yaw);
+        _motors.moveLeftSide(clampMotorSpeed(speed - operation));
+        _motors.moveRightSide(clampMotorSpeed(speed + operation));
+
+        updateSlopeDetector();
+        if (_slopeDetector.isRejected())
+        {
+            // 坂の途中で階段のような傾きの変化があった
+            _lastSlopeDirection = 0;
+            return SlopeTraverseResult::Rejected;
+        }
+    }
+
+    if (!moveToTileCenterAfterSlope(speed, start_yaw, startTime))
+    {
+        return SlopeTraverseResult::Failed;
+    }
+    return SlopeTraverseResult::Finished;
+}
+
+bool ControlRobot::traverseSlope(int speed, float start_yaw)
+{
+    _slopeDetector.reset();
+    _lastSlopeDirection = 0;
     const unsigned long startTime = millis();
-    while (pitch > -10) // 降り始めるまで
+
+    // 坂に乗るまで（傾きが安定して続くまで）前進
+    while (!_slopeDetector.isOnSlope())
     {
         if (stopIfStartButtonInterrupted(_motors))
         {
@@ -1045,62 +1090,39 @@ bool ControlRobot::goDownSlope(int speed, float start_yaw)
         }
 
         const float operation = PID(start_yaw);
-        const int leftSpeed = clampMotorSpeed(speed - operation);
-        const int rightSpeed = clampMotorSpeed(speed + operation);
+        _motors.moveLeftSide(clampMotorSpeed(speed - operation));
+        _motors.moveRightSide(clampMotorSpeed(speed + operation));
 
-        _motors.moveLeftSide(leftSpeed);
-        _motors.moveRightSide(rightSpeed);
-
-        _sensors.readOrientation(yaw, roll, pitch);
+        updateSlopeDetector();
     }
-    while (pitch < -3) // 降り終わるまで
+
+    switch (finishSlopeTraversal(speed, start_yaw, startTime))
     {
-        if (stopIfStartButtonInterrupted(_motors))
+    case SlopeTraverseResult::Finished:
+        return true;
+    case SlopeTraverseResult::Rejected:
+        // 地図上は坂なので、そのまま平地に戻るまで進んでからタイル中心に合わせる。
+        while (_slopeDetector.isRejected())
         {
-            return false;
+            if (stopIfStartButtonInterrupted(_motors))
+            {
+                return false;
+            }
+            if (millis() - startTime >= kSlopeTimeoutMs)
+            {
+                _motors.stopRobot();
+                return false;
+            }
+            const float operation = PID(start_yaw);
+            _motors.moveLeftSide(clampMotorSpeed(speed - operation));
+            _motors.moveRightSide(clampMotorSpeed(speed + operation));
+            updateSlopeDetector();
         }
-        if (millis() - startTime >= kSlopeTimeoutMs)
-        {
-            _motors.stopRobot();
-            return false;
-        }
-
-        const float operation = PID(start_yaw);
-        const int leftSpeed = clampMotorSpeed(speed - operation);
-        const int rightSpeed = clampMotorSpeed(speed + operation);
-
-        _motors.moveLeftSide(leftSpeed);
-        _motors.moveRightSide(rightSpeed);
-
-        _sensors.readOrientation(yaw, roll, pitch);
+        return moveToTileCenterAfterSlope(speed, start_yaw, startTime);
+    case SlopeTraverseResult::Failed:
+    default:
+        return false;
     }
-    // タイルの真ん中まで前進
-    _vl53s.getVL53s(distance_data);
-    float frontDistance = distance_data[0];
-    while (std::fmod(frontDistance, kTileDistanceMm) > kFrontDistanceMm)
-    {
-        if (stopIfStartButtonInterrupted(_motors))
-        {
-            return false;
-        }
-        if (millis() - startTime >= kSlopeTimeoutMs)
-        {
-            _motors.stopRobot();
-            return false;
-        }
-
-        const float operation = PID(start_yaw);
-        const int leftSpeed = clampMotorSpeed(speed - operation);
-        const int rightSpeed = clampMotorSpeed(speed + operation);
-
-        _motors.moveLeftSide(leftSpeed);
-        _motors.moveRightSide(rightSpeed);
-
-        _vl53s.getVL53s(distance_data);
-        frontDistance = distance_data[0];
-    }
-    _motors.stopRobot();
-    return true;
 }
 
 bool ControlRobot::correctGyroYaw(int nowDir)

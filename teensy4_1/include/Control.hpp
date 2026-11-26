@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "SlopeDetector.hpp"
+
 namespace tb67 {class ControlMotors;}
 namespace sensors {class SensorManager;}
 namespace rescuekits {class RescueKitManager;}
@@ -68,7 +70,7 @@ public:
     int moveForwardOneBlock(int speed, float start_yaw,
         const rcj_maze::FloorPosition& startPosition,
         const rcj_maze::FloorPosition& goalPosition,
-        rcj_maze::MazeMapper& mazeMapper); // 0:前進成功、1:チェックポイント、2:青、3:赤、4:黒、5:障害物回避後に次のタイル、6:障害物回避後に次の次のタイル
+        rcj_maze::MazeMapper& mazeMapper); // 0:前進成功、1:チェックポイント、2:青、3:赤、4:黒、5:障害物回避後に次のタイル、6:障害物回避後に次の次のタイル、7:坂を検出して通過済み
     bool deployRescueKits(int q, String way);
 
     bool turnDegrees(float degree); // -180 ~ 180、LoPで中断したらfalse
@@ -97,16 +99,36 @@ public:
     bool moveForwardMm(int speed, int range, float start_yaw);
     bool moveBackwardMm(int speed, int range, float start_yaw);
 
-    bool climbSlope(int speed, float start_yaw);
-    bool goDownSlope(int speed, float start_yaw); // 下部距離センサーの値が閾値より長かったら下り坂判定
+    // 地図上で坂と分かっている所を通過する（上り・下りはジャイロで判断）。
+    // 坂の手前のタイル中心から呼び、坂を抜けた先のタイル中心で止まる。
+    bool traverseSlope(int speed, float start_yaw);
+    // 直近に検出・通過した坂の向き（+1: 上り、-1: 下り、0: なし）
+    int lastSlopeDirection() const { return _lastSlopeDirection; }
 
     bool correctGyroYaw(int nowDir); // 後ろ下がって壁に機体押し付けて無理やりジャイロのyawのドリフトとかいうやつを修正する
 
     // 障害物回避後の移動結果。通常の結果(0〜4)と重複しない値を使う。
     static constexpr int kMoveResultObstacleNextTile = 5;
     static constexpr int kMoveResultObstacleSecondNextTile = 6;
+    // moveForwardOneBlock中にジャイロで坂を検出し、坂を抜けた先のタイル中心まで進んだ。
+    static constexpr int kMoveResultSlope = 7;
 
 private:
+    enum class SlopeTraverseResult
+    {
+        Finished,  // 坂を抜けてタイル中心で停止した
+        Rejected,  // 坂ではなかった（階段など）。走行は継続できる
+        Failed     // タイムアウトまたはスタートボタンによる中断
+    };
+
+    void updateSlopeDetector();
+    // 坂の上にいると判定された後、坂を抜けてタイル中心に着くまで進む。
+    SlopeTraverseResult finishSlopeTraversal(int speed, float start_yaw, unsigned long startTime);
+    bool moveToTileCenterAfterSlope(int speed, float start_yaw, unsigned long startTime);
+
+    slope::SlopeDetector _slopeDetector;
+    int _lastSlopeDirection = 0;
+
     // 前方距離センサーの値を基準に、指定したタイル中心まで前進する。
     bool moveForwardToFrontDistance(int speed, float targetDistanceMm, float targetYaw);
     void beginIntermediateTileWallRecording(

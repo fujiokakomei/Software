@@ -30,6 +30,8 @@ public:
     bool waitForGyroCalibration(); //起動時に実行、タイムアウト時はfalse
     bool calibrateGyroOffset(int nowDir); //ジャイロセンサーのオフセット値をキャリブレーションする関数
     void readOrientation(float &x, float &y, float &z);
+    // 坂判定用。起動時を0度として、機首上げを正とした前後の傾きと左右の傾き[deg]を返す。
+    void readTilt(float &noseUpPitch, float &sideRoll);
     float readYaw();
 
 private:

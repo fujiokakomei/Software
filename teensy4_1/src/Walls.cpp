@@ -7,53 +7,11 @@ void Walls::readWall(std::array<bool, 4>& wall)
 {
     _vl53s.getVL53s(distance_data);
 
-    if (distance_data[0] < frontWallThreshold)
-    {
-        wall[0] = true;
-    }
-    else
-    {
-        wall[0] = false;
-    }
-
-    if (distance_data[1] < rightWallThreshold)
-    {
-        wall[1] = true;
-    }
-    else
-    {
-        wall[1] = false;
-    }
-
-    if (distance_data[2] < backWallThreshold)
-    {
-        wall[2] = true;
-    }
-    else
-    {
-        wall[2] = false;
-    }
-
-    if (distance_data[3] < leftWallThreshold)
-    {
-        wall[3] = true;
-    }
-    else
-    {
-        wall[3] = false;
-    }
-}
-
-int Walls::readFront()
-{
-    _vl53s.getVL53s(distance_data);
-
-    if (distance_data[0] < frontSlopeThresholdUpperSensor && distance_data[0] > frontWallThreshold)
-    {
-        return 1;
-    }
-
-    return 0;
+    // 上部VL53は30度刻みで 0:前、3:右、6:後、9:左（Control.cppと同じ並び）。
+    wall[0] = distance_data[kFrontSensor] < frontWallThreshold;
+    wall[1] = distance_data[kRightSensor] < rightWallThreshold;
+    wall[2] = distance_data[kBackSensor] < backWallThreshold;
+    wall[3] = distance_data[kLeftSensor] < leftWallThreshold;
 }
 
 }
