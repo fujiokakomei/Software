@@ -22,8 +22,8 @@ constexpr float kSilverBalanceRatio = 1.2f;
 // 坂判定に使う傾きの軸と向き（BNO055の取り付け向きに合わせて変更する）。
 // gyro_test で機体の前を持ち上げたときに増える軸を選び、増えるなら+1、減るなら-1。
 // false: orientation.z (Pitch) を前後の傾きに使う / true: orientation.y (Roll) を使う
-constexpr bool kUseRollAxisForPitch = false;
-constexpr float kNoseUpSign = 1.0f;
+constexpr bool kUseRollAxisForPitch = true;
+constexpr float kNoseUpSign = -1.0f;
 
 float normalizeYaw360(float yaw)
 {

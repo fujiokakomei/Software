@@ -17,7 +17,7 @@ void setup()
 {
     _motors.setupMotors(m1_1, m1_2, m2_1, m2_2, m3_1, m3_2, m4_1, m4_2);
     delay(1000);
-
+/*
     for (int i = 100; i < 255; i++)
     {
         analogWrite(m1_1, i);
@@ -81,13 +81,17 @@ void setup()
     analogWrite(m4_1, LOW);
     analogWrite(m4_2, LOW);
 
+*/
+/*
+    _motors.moveForward(150);
+    delay(10000);
 
-    _motors.moveForward(200);
-    delay(1000);
     _motors.moveBackward(200);
     delay(1000);
+*/
     _motors.turnRight();
-    delay(1000);
+    delay(5000);
+/*
     _motors.turnLeft();
     delay(1000);
     _motors.brakeRobot();
@@ -96,6 +100,7 @@ void setup()
     delay(1000);
     _motors.moveLeftSide(200);
     delay(1000);
+*/
     _motors.stopRobot();
 }
 

@@ -23,6 +23,7 @@ bool ButtonManager::isPressed()
     int currentState = digitalRead(pin);
     bool pressed = (lastState == HIGH && currentState == LOW); //前回がHIGHで今回がLOWなら押されたと判断
     lastState = currentState; //現在の状態を保存
+    delay(50);
     return pressed;
 }
 

@@ -53,15 +53,15 @@ void printDistances(
     int availableAfter,
     const uppervl53s::UpperVL53s::ReceiveDebugInfo& debugInfo)
 {
-    Serial.print(F("[upper_vl53] t="));
-    Serial.print(millis());
-    Serial.print(F(" ms, Serial8 available="));
-    Serial.print(availableBefore);
-    Serial.print(F(" -> "));
-    Serial.print(availableAfter);
-    Serial.println(F(" bytes"));
+    //Serial.print(F("[upper_vl53] t="));
+    //Serial.print(millis());
+    //Serial.print(F(" ms, Serial8 available="));
+    //Serial.print(availableBefore);
+    //Serial.print(F(" -> "));
+    //Serial.print(availableAfter);
+    //Serial.println(F(" bytes"));
 
-    printRawData(debugInfo);
+    //printRawData(debugInfo);
 
     Serial.print(F("  distances (mm): "));
     for (size_t i = 0; i < uppervl53s::UpperVL53s::NUM_SENSORS; ++i)
@@ -76,6 +76,7 @@ void printDistances(
     }
     Serial.println();
 
+    /*
     if (!hasPreviousDistances)
     {
         Serial.println(F("  changes: first sample"));
@@ -83,7 +84,8 @@ void printDistances(
         hasPreviousDistances = true;
         return;
     }
-
+    */
+    /*
     Serial.print(F("  changes: "));
     bool changed = false;
     for (size_t i = 0; i < uppervl53s::UpperVL53s::NUM_SENSORS; ++i)
@@ -108,6 +110,7 @@ void printDistances(
     {
         Serial.print(F("none"));
     }
+    */
     Serial.println();
 
     memcpy(previousDistances, distances, sizeof(distances));

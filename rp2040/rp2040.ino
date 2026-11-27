@@ -14,7 +14,7 @@ constexpr size_t PAYLOAD_SIZE = SENSOR_COUNT * sizeof(uint16_t);
 PCA9555 ioex;
 
 // 使用しないVL53L0Xの番号（0始まり）。未使用がない場合は範囲外のSENSOR_COUNTを残す。
-constexpr uint8_t UNUSED_SENSOR_NUMBERS[] = {SENSOR_COUNT}; //未使用なし
+constexpr uint8_t UNUSED_SENSOR_NUMBERS[] = {4,5,7,8}; //未使用なし
 
 // VL53L0Xオブジェクトの配列
 Adafruit_VL53L0X lox[SENSOR_COUNT];
@@ -119,7 +119,7 @@ void setup() {
             continue;
         }
 
-        delay(1000);
+        delay(500);
         Serial.print("Initializing sensor ");
         Serial.println(i);
 
@@ -131,7 +131,7 @@ void setup() {
             Serial.println(i);
             haltWithMessage("halted");
         }
-        delay(1000);
+        delay(500);
 
         // 初期アドレス(0x29)でライブラリを初期化、新しいアドレスを設定
         if (!lox[i].begin(sensor_addresses[i], false, &Wire))

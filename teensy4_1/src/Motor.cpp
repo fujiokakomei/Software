@@ -9,6 +9,7 @@ namespace
 {
 
 constexpr int kMaxPwm = 255;
+constexpr int kRollPwm = 200;
 // Teensyの8bit分解能では256を渡すと100%（常時HIGH）になる。
 constexpr int kFullOnPwm = 256;
 
@@ -74,14 +75,14 @@ void ControlMotors::moveBackward(int speed)
 
 void ControlMotors::turnRight() // 超信地旋回（右）
 {
-    moveRightSide(-kMaxPwm);
-    moveLeftSide(kMaxPwm);
+    moveRightSide(-kRollPwm);
+    moveLeftSide(kRollPwm);
 }
 
 void ControlMotors::turnLeft() // 超信地旋回（左）
 {
-    moveRightSide(kMaxPwm);
-    moveLeftSide(-kMaxPwm);
+    moveRightSide(kRollPwm);
+    moveLeftSide(-kRollPwm);
 }
 
 void ControlMotors::stopRobot() // 惰性で停止（全ピンLOW）
