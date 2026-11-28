@@ -14,11 +14,11 @@ private:
     static constexpr int kBackSensor = 6;
     static constexpr int kLeftSensor = 9;
 
-    // Control.cppの21~24行の値 + 20
-    const float frontWallThreshold = 136.0f;
-    const float backWallThreshold = 127.0f;
-    const float rightWallThreshold = 131.7f;
-    const float leftWallThreshold = 131.7f;
+    // Control.cppの21~24行の値 + 20 + 20
+    const float frontWallThreshold = 156.0f;
+    const float backWallThreshold = 147.0f;
+    const float rightWallThreshold = 151.7f;
+    const float leftWallThreshold = 151.7f;
 
     uint16_t distance_data[uppervl53s::UpperVL53s::NUM_SENSORS] = {0};
     uppervl53s::UpperVL53s& _vl53s;

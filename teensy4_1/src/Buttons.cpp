@@ -6,9 +6,31 @@ namespace
 {
 volatile bool startButtonInterrupted = false;
 volatile bool consumedStartButtonInterrupt = false;
-constexpr unsigned long kStartButtonDebounceUs = 50000;
+// 押したと受け付けた後、次の押下を受け付けない時間
+constexpr unsigned long kStartButtonDebounceUs = 300000;
+// LOW になる直前に、これだけの間 HIGH（離した状態）が続いていなければチャタリングとみなす。
+// ボタンを離すときのばたつき(HIGH→LOW→HIGH)を「押した」と誤検出しないため。
+constexpr unsigned long kStartButtonReleasedStableUs = 30000;
 volatile unsigned long lastStartButtonInterruptUs = 0;
 volatile bool hasStartButtonInterruptTimestamp = false;
+volatile unsigned long lastStartButtonHighUs = 0; // 最後に HIGH になった時刻
+int startButtonPin = -1;
+}
+
+void setupStartButtonInterrupt(int pin)
+{
+    startButtonPin = pin;
+    lastStartButtonHighUs = micros();
+    // 押したときだけでなく離したときも割り込みを受けて、離した時刻を記録する
+    attachInterrupt(digitalPinToInterrupt(pin), requestStartButtonInterrupt, CHANGE);
+}
+
+void clearStartButtonInterrupt()
+{
+    noInterrupts();
+    startButtonInterrupted = false;
+    consumedStartButtonInterrupt = false;
+    interrupts();
 }
 
 void ButtonManager::setupButton(int pin)
@@ -30,6 +52,21 @@ bool ButtonManager::isPressed()
 void requestStartButtonInterrupt()
 {
     const unsigned long nowUs = micros();
+    if (startButtonPin >= 0)
+    {
+        if (digitalReadFast(startButtonPin) == HIGH)
+        {
+            // 離した（またはばたつき中にHIGHになった）だけ
+            lastStartButtonHighUs = nowUs;
+            return;
+        }
+        if (nowUs - lastStartButtonHighUs < kStartButtonReleasedStableUs)
+        {
+            // HIGH になった直後の LOW はチャタリング
+            return;
+        }
+    }
+
     if (hasStartButtonInterruptTimestamp &&
         nowUs - lastStartButtonInterruptUs < kStartButtonDebounceUs)
     {

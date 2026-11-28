@@ -462,6 +462,7 @@ bool moveForward()
     }
 
     printPose("MOVE end");
+    delay(2000);
     return true;
 }
 
@@ -527,7 +528,7 @@ void setup()
 {
     Serial.begin(115200); // デバッグ用USBシリアル
     upperVL53s.begin(115200); // rp2040 (Serial8、受信バッファを増やして開始)
-    delay(5500);
+    //delay(5500);
     Serial3.begin(115200); // UnitV 1
     Serial5.begin(115200); // UnitV 2
     Serial3.setTimeout(1000); // readStringUntil()の待機上限
@@ -537,7 +538,7 @@ void setup()
     startButton.setupButton(startButtonPin);
     spare1Button.setupButton(spare1ButtonPin);
     spare2Button.setupButton(spare2ButtonPin);
-    attachInterrupt(digitalPinToInterrupt(startButtonPin), buttons::requestStartButtonInterrupt, FALLING);
+    buttons::setupStartButtonInterrupt(startButtonPin);
 
 
     loadCellManager.setupLoadCells(rightLoadCellPin, leftLoadCellPin);
@@ -563,6 +564,15 @@ void setup()
 void loop()
 {
     printStateChange();
+
+    // 走っていない間もRP2040からの受信を処理し、状況メッセージをすぐ表示する
+    if (robotState == RobotState::WaitingStart ||
+        robotState == RobotState::Paused ||
+        robotState == RobotState::Finished)
+    {
+        static uint16_t idleDistances[uppervl53s::UpperVL53s::NUM_SENSORS];
+        upperVL53s.getVL53s(idleDistances);
+    }
 
     if (buttons::consumeStartButtonInterrupt())
     {
@@ -594,12 +604,18 @@ void loop()
             lastCheckpointPose.dir = robotPose.dir;
 
             checkWalls.readWall(nowWall);
+            if (upperVL53s.lastFrameAgeMs() > 500)
+            {
+                DBG("ERROR start: 上部VL53のデータがRP2040から届いていない (age=%lu ms)",
+                    upperVL53s.lastFrameAgeMs());
+            }
             printWalls("start", nowWall);
             mazeMapper.updateMap(robotPose.floor, robotPose.x, robotPose.y, robotPose.dir, nowWall); // (0, 0)を作成
 
             isFirstBoot = false;
             robotState = RobotState::Searching;
-            buttons::takeConsumedStartButtonInterrupt();
+            // センサー初期化中（約2秒）にボタンを触っていても探索を止めない
+            buttons::clearStartButtonInterrupt();
         }
         else
         {

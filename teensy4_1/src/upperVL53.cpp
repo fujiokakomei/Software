@@ -18,6 +18,30 @@ uint8_t UpperVL53s::crc8(const uint8_t* data, size_t len)
     return crc;
 }
 
+// ヘッダの1文字目を判定する
+void UpperVL53s::startHeader(uint8_t byte)
+{
+    if (byte == kHeaderFirst)
+    {
+        _receiveState = ReceiveState::WaitForL;
+    }
+    else if (byte == kMessageHeaderFirst)
+    {
+        _receiveState = ReceiveState::WaitForG;
+    }
+    else
+    {
+        _receiveState = ReceiveState::WaitForV;
+    }
+}
+
+void UpperVL53s::handleMessage()
+{
+    _message[1 + _messageLength] = '\0';
+    ++_messageCount;
+    DBG("RP2040| %s", reinterpret_cast<const char*>(_message + 1));
+}
+
 bool UpperVL53s::receiveDistance(uint16_t out[NUM_SENSORS], ReceiveDebugInfo* debugInfo)
 {
     while (_rp2040.available())
@@ -39,10 +63,7 @@ bool UpperVL53s::receiveDistance(uint16_t out[NUM_SENSORS], ReceiveDebugInfo* de
         switch (_receiveState)
         {
         case ReceiveState::WaitForV:
-            if (byte == kHeaderFirst)
-            {
-                _receiveState = ReceiveState::WaitForL;
-            }
+            startHeader(byte);
             break;
 
         case ReceiveState::WaitForL:
@@ -51,9 +72,52 @@ bool UpperVL53s::receiveDistance(uint16_t out[NUM_SENSORS], ReceiveDebugInfo* de
                 _payloadIndex = 0;
                 _receiveState = ReceiveState::ReceivePayload;
             }
-            else if (byte != kHeaderFirst)
+            else
             {
-                _receiveState = ReceiveState::WaitForV;
+                startHeader(byte);
+            }
+            break;
+
+        case ReceiveState::WaitForG:
+            if (byte == kMessageHeaderSecond)
+            {
+                _receiveState = ReceiveState::ReceiveMessageLength;
+            }
+            else
+            {
+                startHeader(byte);
+            }
+            break;
+
+        case ReceiveState::ReceiveMessageLength:
+            if (byte == 0 || byte > MESSAGE_MAX_LENGTH)
+            {
+                startHeader(byte); // 長さがおかしいので、メッセージではなかった
+                break;
+            }
+            _message[0] = byte;
+            _messageLength = byte;
+            _messageIndex = 0;
+            _receiveState = ReceiveState::ReceiveMessage;
+            break;
+
+        case ReceiveState::ReceiveMessage:
+            _message[1 + _messageIndex++] = byte;
+            if (_messageIndex == _messageLength)
+            {
+                _receiveState = ReceiveState::ReceiveMessageChecksum;
+            }
+            break;
+
+        case ReceiveState::ReceiveMessageChecksum:
+            _receiveState = ReceiveState::WaitForV;
+            if (crc8(_message, 1 + _messageLength) == byte)
+            {
+                handleMessage();
+            }
+            else if (debugInfo != nullptr)
+            {
+                ++debugInfo->checksumErrors;
             }
             break;
 
@@ -112,11 +176,10 @@ void UpperVL53s::getVL53s(uint16_t _distance_data[NUM_SENSORS], ReceiveDebugInfo
     if (static_cast<size_t>(_rp2040.available()) >= STALE_BUFFER_BYTES)
     {
         // 長時間読まなかったため受信バッファが溢れ、古いデータしか残っていない。
-        // 捨てて、次に届く新しいフレームを待つ。
-        DBG("VL53 RX buffer overflow (%d bytes), drop old data", _rp2040.available());
-        while (_rp2040.available())
+        // 古い距離は使わず（状況メッセージだけは表示する）、次に届く新しいフレームを待つ。
+        DBG("VL53 RX buffer overflow (%d bytes), drop old distance data", _rp2040.available());
+        while (receiveDistance(received, debugInfo))
         {
-            _rp2040.read();
         }
         _receiveState = ReceiveState::WaitForV;
 
@@ -144,10 +207,30 @@ void UpperVL53s::getVL53s(uint16_t _distance_data[NUM_SENSORS], ReceiveDebugInfo
     memcpy(_distance_data, distance_data, PAYLOAD_SIZE);
 
     // RP2040からのフレームが途絶えていたら警告（1秒に1回まで）
-    if (!_hasFrame || millis() - _lastFrameMs > 500)
+    if (!_hasFrame)
     {
-        DBG_EVERY(1000, "WARN VL53 no frame from RP2040 for %ld ms",
-                  _hasFrame ? static_cast<long>(millis() - _lastFrameMs) : -1L);
+        DBG_EVERY(1000, "WARN VL53 no frame from RP2040 yet (RP2040の電源・起動・UART配線を確認)");
+    }
+    else if (millis() - _lastFrameMs > 500)
+    {
+        DBG_EVERY(1000, "WARN VL53 no frame from RP2040 for %lu ms", millis() - _lastFrameMs);
+    }
+    else
+    {
+        // RP2040は動いているが、起動できていないセンサーがある
+        char missing[48] = "";
+        size_t length = 0;
+        for (size_t i = 0; i < NUM_SENSORS; ++i)
+        {
+            if (distance_data[i] == NO_DATA && length + 4 < sizeof(missing))
+            {
+                length += snprintf(missing + length, sizeof(missing) - length, " %u", static_cast<unsigned>(i));
+            }
+        }
+        if (length > 0)
+        {
+            DBG_EVERY(1000, "WARN VL53 no data from sensor(s):%s (RP2040のUSBログで原因を確認)", missing);
+        }
     }
 }
 }

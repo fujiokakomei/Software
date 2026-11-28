@@ -14,7 +14,7 @@
 namespace debuglog
 {
 // 1行の最大長。送信バッファにこれだけの空きがないときは出力を捨てて、走行を止めない。
-constexpr int kMaxLineLength = 160;
+constexpr int kMaxLineLength = 256;
 
 inline bool canPrint()
 {

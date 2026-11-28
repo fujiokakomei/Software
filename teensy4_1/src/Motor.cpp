@@ -75,14 +75,14 @@ void ControlMotors::moveBackward(int speed)
 
 void ControlMotors::turnRight() // 超信地旋回（右）
 {
-    moveRightSide(-kRollPwm);
-    moveLeftSide(kRollPwm);
+    moveRightSide(kRollPwm);
+    moveLeftSide(-kRollPwm);
 }
 
 void ControlMotors::turnLeft() // 超信地旋回（左）
 {
-    moveRightSide(kRollPwm);
-    moveLeftSide(-kRollPwm);
+    moveRightSide(-kRollPwm);
+    moveLeftSide(kRollPwm);
 }
 
 void ControlMotors::stopRobot() // 惰性で停止（全ピンLOW）

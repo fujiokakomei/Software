@@ -39,6 +39,10 @@ constexpr unsigned long kMoveTimeoutMs = 15000;
 constexpr unsigned long kSlopeTimeoutMs = 10000;
 // 1マス分進み終わった時点で坂かどうか判定途中（傾いている）なら、判定がつくまで延長する時間
 constexpr unsigned long kSlopeResolveTimeoutMs = 1500;
+// 坂判定の state が 1(Candidate)・2(OnSlope)・4(Rejected) のとき、
+// つまり坂・階段・バンプなどで機体が傾いている間の前進速度(PWM 0〜255)。
+// 通常の前進速度は main.cpp の defaultSpeed。
+constexpr int kTiltedSpeed = 220;
 constexpr unsigned long kGyroCorrectionTimeoutMs = 5000;
 constexpr unsigned long kCameraResponseTimeoutMs = 3000;
 constexpr int kMotionTimeoutResult = -1;
@@ -54,7 +58,7 @@ constexpr int R_SENSOR = 3;
 constexpr int DL_SENSOR = 10;
 constexpr int L_SENSOR = 9;
 // 左右障害物検知距離閾値&回避用定数とか
-constexpr float kObstacleThresholdMm = 120.0f;
+constexpr float kObstacleThresholdMm = 90.0f;
 constexpr float kTurningAngle = 20.0f;
 constexpr int kMovingSpeed = 50;
 constexpr int kMovingMs = 1000; //ミリ秒
@@ -85,6 +89,16 @@ constexpr unsigned long kArcRateResetIntervalMs = 250;
     case slope::SlopeDetector::State::Rejected: return "Rejected(stairs?)";
     }
     return "?";
+}
+
+// 機体が傾いている間(state 1,2,4)は kTiltedSpeed、それ以外は normalSpeed を返す。
+int speedForSlopeState(const slope::SlopeDetector& detector, int normalSpeed)
+{
+    if (detector.isCandidate() || detector.isOnSlope() || detector.isRejected())
+    {
+        return kTiltedSpeed;
+    }
+    return normalSpeed;
 }
 
 [[maybe_unused]] const char* colorTileName(sensors::ColorTile tile)
@@ -329,6 +343,7 @@ bool ControlRobot::turnDegrees(float degree)
     const float targetTurn = fabsf(degree);
     const bool turnRight = degree > 0.0f;
     float turned = 0.0f;
+    float previous_yaw = start_yaw;
     const unsigned long startTime = millis();
     DBG("TURN start %.1f deg (yaw=%.1f)", degree, start_yaw);
 
@@ -355,13 +370,12 @@ bool ControlRobot::turnDegrees(float degree)
             _motors.turnLeft();
         }
 
+        // 前回からの変化量を積算する。以前は (yaw - start_yaw) が少しでも逆向きに
+        // ぶれると +360 されて「359.9度回った」とみなし、回らずに終了していた。
         _sensors.readOrientation(yaw, roll, pitch);
-        const float delta = normalizeAngle(yaw - start_yaw);
-        turned = turnRight ? delta : -delta;
-        if (turned < 0.0f)
-        {
-            turned += 360.0f;
-        }
+        const float delta = normalizeAngle(yaw - previous_yaw);
+        previous_yaw = yaw;
+        turned += turnRight ? delta : -delta;
     }
 
     _motors.stopRobot();
@@ -773,6 +787,11 @@ int ControlRobot::moveForwardOneBlock(
     sensors::ColorTile lastColorTile = sensors::ColorTile::None;
     DBG("FWD start front=%.0f goal=%.0f yaw=%.1f target_yaw=%.1f",
         startDistance, goalDistance, _sensors.readYaw(), start_yaw);
+    if (startDistance < frontWallThreshold)
+    {
+        DBG("WARN FWD start: 前に壁がある (front=%.0f < %.0f)。旋回が足りていない可能性",
+            startDistance, frontWallThreshold);
+    }
     _rightCam.print("mode a\n");
     _leftCam.print("mode a\n");
     while (true)
@@ -829,8 +848,9 @@ int ControlRobot::moveForwardOneBlock(
         }
 
         const float operation = PID(start_yaw) + wallFollowingOperation();
-        const int leftSpeed = clampMotorSpeed(speed - operation);
-        const int rightSpeed = clampMotorSpeed(speed + operation);
+        const int baseSpeed = speedForSlopeState(_slopeDetector, speed);
+        const int leftSpeed = clampMotorSpeed(baseSpeed - operation);
+        const int rightSpeed = clampMotorSpeed(baseSpeed + operation);
 
         _motors.moveLeftSide(leftSpeed);
         _motors.moveRightSide(rightSpeed);
@@ -1132,8 +1152,9 @@ ControlRobot::SlopeTraverseResult ControlRobot::finishSlopeTraversal(
         }
 
         const float operation = PID(start_yaw);
-        _motors.moveLeftSide(clampMotorSpeed(speed - operation));
-        _motors.moveRightSide(clampMotorSpeed(speed + operation));
+        const int baseSpeed = speedForSlopeState(_slopeDetector, speed);
+        _motors.moveLeftSide(clampMotorSpeed(baseSpeed - operation));
+        _motors.moveRightSide(clampMotorSpeed(baseSpeed + operation));
 
         updateSlopeDetector();
         if (_slopeDetector.isRejected())
@@ -1175,8 +1196,9 @@ bool ControlRobot::traverseSlope(int speed, float start_yaw)
         }
 
         const float operation = PID(start_yaw);
-        _motors.moveLeftSide(clampMotorSpeed(speed - operation));
-        _motors.moveRightSide(clampMotorSpeed(speed + operation));
+        const int baseSpeed = speedForSlopeState(_slopeDetector, speed);
+        _motors.moveLeftSide(clampMotorSpeed(baseSpeed - operation));
+        _motors.moveRightSide(clampMotorSpeed(baseSpeed + operation));
 
         updateSlopeDetector();
     }
@@ -1199,8 +1221,9 @@ bool ControlRobot::traverseSlope(int speed, float start_yaw)
                 return false;
             }
             const float operation = PID(start_yaw);
-            _motors.moveLeftSide(clampMotorSpeed(speed - operation));
-            _motors.moveRightSide(clampMotorSpeed(speed + operation));
+            const int baseSpeed = speedForSlopeState(_slopeDetector, speed);
+            _motors.moveLeftSide(clampMotorSpeed(baseSpeed - operation));
+            _motors.moveRightSide(clampMotorSpeed(baseSpeed + operation));
             updateSlopeDetector();
         }
         return moveToTileCenterAfterSlope(speed, start_yaw, startTime);
