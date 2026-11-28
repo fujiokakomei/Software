@@ -14,7 +14,7 @@ constexpr size_t PAYLOAD_SIZE = SENSOR_COUNT * sizeof(uint16_t);
 
 // 起動時のXSHUT操作後の待ち時間。初回は動作確認済みの長めの値、
 // 動作中の復旧では止まっている時間を短くするため短めの値を使う。
-constexpr uint32_t SETUP_BOOT_DELAY_MS = 100;
+constexpr uint32_t SETUP_BOOT_DELAY_MS = 200;
 constexpr uint32_t RECOVERY_BOOT_DELAY_MS = 20;
 
 // I2Cが応答しないときに待つ上限。超えたらI2C周辺回路をリセットする。

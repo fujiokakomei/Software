@@ -8,6 +8,7 @@
 #include "LoadCell.hpp"
 #include "upperVL53.hpp"
 #include "Mapping.hpp"
+#include "Debug.hpp"
 
 #include <array>
 #include <math.h>
@@ -72,6 +73,32 @@ constexpr float kArcRateKp = 0.35f;
 constexpr float kArcRateKi = 0.03f;
 constexpr float kMaxArcRateIntegral = 300.0f;
 constexpr unsigned long kArcRateResetIntervalMs = 250;
+
+[[maybe_unused]] const char* slopeStateName(slope::SlopeDetector::State state)
+{
+    switch (state)
+    {
+    case slope::SlopeDetector::State::Flat: return "Flat";
+    case slope::SlopeDetector::State::Candidate: return "Candidate";
+    case slope::SlopeDetector::State::OnSlope: return "OnSlope";
+    case slope::SlopeDetector::State::Finished: return "Finished";
+    case slope::SlopeDetector::State::Rejected: return "Rejected(stairs?)";
+    }
+    return "?";
+}
+
+[[maybe_unused]] const char* colorTileName(sensors::ColorTile tile)
+{
+    switch (tile)
+    {
+    case sensors::ColorTile::None: return "None";
+    case sensors::ColorTile::Blue: return "Blue";
+    case sensors::ColorTile::Red: return "Red";
+    case sensors::ColorTile::Silver: return "Silver";
+    case sensors::ColorTile::Black: return "Black";
+    }
+    return "?";
+}
 
 float normalizeAngle(float angle)
 {
@@ -303,16 +330,19 @@ bool ControlRobot::turnDegrees(float degree)
     const bool turnRight = degree > 0.0f;
     float turned = 0.0f;
     const unsigned long startTime = millis();
+    DBG("TURN start %.1f deg (yaw=%.1f)", degree, start_yaw);
 
     while (turned < targetTurn)
     {
         if (stopIfStartButtonInterrupted(_motors))
         {
+            DBG("TURN interrupted by start button (turned=%.1f)", turned);
             return false;
         }
         if (millis() - startTime >= kTurnTimeoutMs)
         {
             _motors.stopRobot();
+            DBG("ERROR TURN timeout (turned=%.1f / %.1f, yaw=%.1f)", turned, targetTurn, yaw);
             return false;
         }
 
@@ -335,6 +365,7 @@ bool ControlRobot::turnDegrees(float degree)
     }
 
     _motors.stopRobot();
+    DBG("TURN done turned=%.1f yaw=%.1f (%lu ms)", turned, yaw, millis() - startTime);
     return true;
 }
 
@@ -421,6 +452,8 @@ float ControlRobot::PID(float target_yaw)
 
 bool ControlRobot::deployRescueKits(int q, String way)
 {
+    DBG("KIT request %d kit(s) on %s side (remaining R=%d L=%d)",
+        q, way.c_str(), _rightKits.remainingKits, _leftKits.remainingKits);
     blinkRescueKitLed(_rightKits, q); // Unharmedでも光らせる
     bool dropped = false;
 
@@ -449,6 +482,8 @@ bool ControlRobot::deployRescueKits(int q, String way)
     }
 
     //blinkRescueKitLed(primaryKits, q); 一番上に移動
+    DBG("KIT done dropped=%d (remaining R=%d L=%d)",
+        dropped, _rightKits.remainingKits, _leftKits.remainingKits);
     return dropped;
 }
 
@@ -658,23 +693,32 @@ int ControlRobot::avoidObstacle(float movedDistanceMm)
     // 距離センサー1,11
     if (distance_data[1] < kObstacleThresholdMm && distance_data[11] > kObstacleThresholdMm)
     {
+        DBG("OBSTACLE VL53 front-right=%u front-left=%u -> avoid right", distance_data[1], distance_data[11]);
         avoidObstacleControl("right");
         isAvoided = true;
     }
     else if (distance_data[1] > kObstacleThresholdMm && distance_data[11] < kObstacleThresholdMm)
     {
+        DBG("OBSTACLE VL53 front-right=%u front-left=%u -> avoid left", distance_data[1], distance_data[11]);
         avoidObstacleControl("left");
         isAvoided = true;
     }
     else if (distance_data[1] < kObstacleThresholdMm && distance_data[11] < kObstacleThresholdMm)
     {
         // 0番VL53故障確定　どーにかせい
+        DBG_EVERY(1000, "WARN OBSTACLE both front diagonals < %.0f (R=%u L=%u)",
+                  kObstacleThresholdMm, distance_data[1], distance_data[11]);
     }
     // 距離センサーで回避できた場合は、ロードセルによる回避を重ねて実行しない。
     if (!isAvoided)
     {
         // ロードセルの方。ここを使うのは、距離センサー故障または例外的な置かれ方を想定する。
         const int obstacles = _loadCells.readLoadCell();
+        if (obstacles != 0)
+        {
+            DBG("OBSTACLE loadcell=%d (1:R 2:L 3:both) R=%.1f L=%.1f", obstacles,
+                _loadCells.readRightLoadCell(), _loadCells.readLeftLoadCell());
+        }
         switch (obstacles)
         {
         case 0: // なし
@@ -699,6 +743,8 @@ int ControlRobot::avoidObstacle(float movedDistanceMm)
 
     if (isAvoided) // 中央には戻ってるからあとは前進か後退で適切なタイルの中央にいく
     {
+        DBG("OBSTACLE avoided, moved=%.0f mm -> target %s", movedDistanceMm,
+            movedDistanceMm >= kObstacleSecondTileThresholdMm ? "2nd next tile" : "next tile");
         // ちょうど60 mmは「6 cm以上」として次の次のタイルを選ぶ。
         return movedDistanceMm >= kObstacleSecondTileThresholdMm ? 2 : 1;
     }
@@ -724,6 +770,9 @@ int ControlRobot::moveForwardOneBlock(
     unsigned long slopeResolveStartTime = 0;
     _slopeDetector.reset();
     _lastSlopeDirection = 0;
+    sensors::ColorTile lastColorTile = sensors::ColorTile::None;
+    DBG("FWD start front=%.0f goal=%.0f yaw=%.1f target_yaw=%.1f",
+        startDistance, goalDistance, _sensors.readYaw(), start_yaw);
     _rightCam.print("mode a\n");
     _leftCam.print("mode a\n");
     while (true)
@@ -735,6 +784,8 @@ int ControlRobot::moveForwardOneBlock(
         if (millis() - motionStartTime >= kMoveTimeoutMs)
         {
             _motors.stopRobot();
+            DBG("ERROR FWD timeout front=%.0f goal=%.0f (VL53 frame age=%lu ms)",
+                nowDistance, goalDistance, _vl53s.lastFrameAgeMs());
             return kMotionTimeoutResult;
         }
 
@@ -772,6 +823,7 @@ int ControlRobot::moveForwardOneBlock(
             }
             if (millis() - slopeResolveStartTime >= kSlopeResolveTimeoutMs)
             {
+                DBG("FWD slope candidate not resolved, stop as normal tile");
                 break;
             }
         }
@@ -786,11 +838,23 @@ int ControlRobot::moveForwardOneBlock(
 
         _vl53s.getVL53s(distance_data);
         nowDistance = distance_data[0];
+        DBG_EVERY(200, "FWD front=%.0f/%.0f yaw=%.1f op=%.1f L=%d R=%d vl53 0=%u 3=%u 6=%u 9=%u",
+                  nowDistance, goalDistance, _sensors.readYaw(), operation, leftSpeed, rightSpeed,
+                  distance_data[0], distance_data[3], distance_data[6], distance_data[9]);
 
 
         //カラータイル処理
         const sensors::ColorTile colorTile =
             tilted ? sensors::ColorTile::None : sensors::detectColorTile(_sensors);
+        if (colorTile != lastColorTile)
+        {
+            uint16_t r, g, b, c;
+            float lux;
+            _sensors.lastColor(r, g, b, c, lux);
+            DBG("COLOR %s -> %s (r=%u g=%u b=%u c=%u lux=%.1f) front=%.0f",
+                colorTileName(lastColorTile), colorTileName(colorTile), r, g, b, c, lux, nowDistance);
+            lastColorTile = colorTile;
+        }
         if (colorTile == sensors::ColorTile::Blue && !handledBlueTile)
         {
             /* 前進終わってから5秒待つように変更(main.cppで待つ処理する)
@@ -824,6 +888,7 @@ int ControlRobot::moveForwardOneBlock(
                 nowDistance = distance_data[0];
             }
             _motors.stopRobot();
+            DBG("FWD %s tile -> backed to start (front=%.0f)", colorResult == 3 ? "red" : "black", nowDistance);
             return colorResult;
         }
 
@@ -835,6 +900,7 @@ int ControlRobot::moveForwardOneBlock(
             if (distance_data[3] < rightWallThreshold) //右に壁があるなら
             {
                 String line = _rightCam.readStringUntil('\n');
+                DBG("CAM right says \"%s\"", line.c_str());
                 if (line == "found")
                 {
                     _motors.brakeRobot();
@@ -847,10 +913,12 @@ int ControlRobot::moveForwardOneBlock(
                     }
                     if (waitResult == SerialWaitResult::TimedOut)
                     {
+                        DBG("ERROR CAM right: no victim type reply");
                         return kMotionTimeoutResult;
                     }
                     String value = _rightCam.readStringUntil('\n');
                     int value_i = value.toInt();
+                    DBG("CAM right victim value=%d (-1:違った)", value_i);
                     if (value_i == -1){
                     } else // 違ったじゃないなら
                     {
@@ -875,6 +943,7 @@ int ControlRobot::moveForwardOneBlock(
             if (distance_data[9] < leftWallThreshold) //左に壁があるなら
             {
                 String line = _leftCam.readStringUntil('\n');
+                DBG("CAM left says \"%s\"", line.c_str());
                 if (line == "found")
                 {
                     _motors.brakeRobot();
@@ -887,10 +956,12 @@ int ControlRobot::moveForwardOneBlock(
                     }
                     if (waitResult == SerialWaitResult::TimedOut)
                     {
+                        DBG("ERROR CAM left: no victim type reply");
                         return kMotionTimeoutResult;
                     }
                     String value = _leftCam.readStringUntil('\n');
                     int value_i = value.toInt();
+                    DBG("CAM left victim value=%d (-1:違った)", value_i);
                     if (value_i == -1){
                     } else // 違ったじゃないなら
                     {
@@ -985,6 +1056,8 @@ int ControlRobot::moveForwardOneBlock(
         return kMoveResultObstacleSecondNextTile;
     }
     _motors.stopRobot();
+    DBG("FWD end front=%.0f checkpoint=%d blue=%d (%lu ms)",
+        nowDistance, detectedCheckpoint, detectedBlueTile, millis() - motionStartTime);
     if (detectedCheckpoint)
     {
         return 1;
@@ -1001,7 +1074,13 @@ void ControlRobot::updateSlopeDetector()
     float noseUpPitch = 0.0f;
     float sideRoll = 0.0f;
     _sensors.readTilt(noseUpPitch, sideRoll);
+    const slope::SlopeDetector::State before = _slopeDetector.state();
     _slopeDetector.update(noseUpPitch, sideRoll, millis());
+    if (_slopeDetector.state() != before)
+    {
+        DBG("SLOPE %s -> %s pitch=%.1f roll=%.1f", slopeStateName(before),
+            slopeStateName(_slopeDetector.state()), noseUpPitch, sideRoll);
+    }
 }
 
 bool ControlRobot::moveToTileCenterAfterSlope(int speed, float start_yaw, unsigned long startTime)
@@ -1036,6 +1115,7 @@ ControlRobot::SlopeTraverseResult ControlRobot::finishSlopeTraversal(
     int speed, float start_yaw, unsigned long startTime)
 {
     _lastSlopeDirection = _slopeDetector.direction();
+    DBG("SLOPE on %s slope, keep going until flat", _lastSlopeDirection > 0 ? "up" : "down");
 
     // 坂を抜けて平地に戻るまで、向きだけPIDで保って前進する。
     while (!_slopeDetector.isFinished())
@@ -1047,6 +1127,7 @@ ControlRobot::SlopeTraverseResult ControlRobot::finishSlopeTraversal(
         if (millis() - startTime >= kSlopeTimeoutMs)
         {
             _motors.stopRobot();
+            DBG("ERROR SLOPE traversal timeout");
             return SlopeTraverseResult::Failed;
         }
 
@@ -1065,8 +1146,10 @@ ControlRobot::SlopeTraverseResult ControlRobot::finishSlopeTraversal(
 
     if (!moveToTileCenterAfterSlope(speed, start_yaw, startTime))
     {
+        DBG("ERROR SLOPE could not reach tile center");
         return SlopeTraverseResult::Failed;
     }
+    DBG("SLOPE finished, at tile center (%lu ms)", millis() - startTime);
     return SlopeTraverseResult::Finished;
 }
 
@@ -1076,6 +1159,7 @@ bool ControlRobot::traverseSlope(int speed, float start_yaw)
     _lastSlopeDirection = 0;
     const unsigned long startTime = millis();
 
+    DBG("SLOPE traverse known slope");
     // 坂に乗るまで（傾きが安定して続くまで）前進
     while (!_slopeDetector.isOnSlope())
     {
@@ -1086,6 +1170,7 @@ bool ControlRobot::traverseSlope(int speed, float start_yaw)
         if (millis() - startTime >= kSlopeTimeoutMs)
         {
             _motors.stopRobot();
+            DBG("ERROR SLOPE known slope not detected (timeout)");
             return false;
         }
 

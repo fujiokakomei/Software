@@ -23,6 +23,8 @@ public:
 
     int led_pin;
     void readColor(uint16_t &r, uint16_t &g, uint16_t &b, uint16_t &c, float &colorTemp, float &lux);
+    // 最後に readColor() で読んだ値（デバッグ表示用。センサーを読み直さない）
+    void lastColor(uint16_t &r, uint16_t &g, uint16_t &b, uint16_t &c, float &lux) const;
 
     float yawoffset = 0.0f; //ジャイロセンサーのヨー軸オフセット値、定期的に更新
     float rolloffset = 0.0f; //ジャイロセンサーのロール軸オフセット値、更新なし(ただの初期値)
@@ -38,6 +40,9 @@ private:
     bool _isReady = false;
     bool _tcsReady = false;
     bool _bnoReady = false;
+
+    uint16_t _lastR = 0, _lastG = 0, _lastB = 0, _lastC = 0;
+    float _lastLux = 0.0f;
 };
 
 ColorTile detectColorTile(SensorManager& sensors);

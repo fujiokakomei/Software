@@ -13,6 +13,7 @@
 #include "upperVL53.hpp"
 #include "Walls.hpp"
 #include "SearchApp.hpp"
+#include "Debug.hpp"
 
 
 
@@ -105,13 +106,96 @@ std::array<bool, 4> nowWall;
 
 int moveResult;
 
-int defaultSpeed = 200; // デフォルト前進速度
+int defaultSpeed = 150; // デフォルト前進速度
 
 std::vector<searchapp::SearchMove> returnWay; // 帰り道
 rcj_maze::FloorPath returnCoordinate; // 帰り道座標
 
 
 //===========================================================================================================================
+
+// ---- デバッグ表示用 ----
+const char* stateName(RobotState state)
+{
+    switch (state)
+    {
+    case RobotState::WaitingStart: return "WaitingStart";
+    case RobotState::Searching: return "Searching";
+    case RobotState::Paused: return "Paused";
+    case RobotState::Returning: return "Returning";
+    case RobotState::Finished: return "Finished";
+    }
+    return "?";
+}
+
+const char* dirName(rcj_maze::Direction dir)
+{
+    switch (dir)
+    {
+    case rcj_maze::NORTH: return "N";
+    case rcj_maze::EAST: return "E";
+    case rcj_maze::SOUTH: return "S";
+    case rcj_maze::WEST: return "W";
+    }
+    return "?";
+}
+
+const char* moveName(searchapp::SearchMove move)
+{
+    switch (move)
+    {
+    case searchapp::SearchMove::Forward: return "Forward";
+    case searchapp::SearchMove::Right: return "Right";
+    case searchapp::SearchMove::Back: return "Back";
+    case searchapp::SearchMove::Left: return "Left";
+    case searchapp::SearchMove::Finished: return "Finished";
+    }
+    return "?";
+}
+
+const char* moveResultName(int result)
+{
+    switch (result)
+    {
+    case -1: return "timeout/error";
+    case 0: return "ok";
+    case 1: return "checkpoint";
+    case 2: return "blue";
+    case 3: return "red";
+    case 4: return "black";
+    case controlrobot::ControlRobot::kMoveResultObstacleNextTile: return "obstacle->next tile";
+    case controlrobot::ControlRobot::kMoveResultObstacleSecondNextTile: return "obstacle->2nd next tile";
+    case controlrobot::ControlRobot::kMoveResultSlope: return "slope";
+    }
+    return "?";
+}
+
+void printPose(const char* label)
+{
+    DBG("%s pose floor=%d (%d,%d) dir=%s", label,
+        robotPose.floor, robotPose.x, robotPose.y, dirName(robotPose.dir));
+}
+
+// 壁の有無と、判定に使った上部VL53 (0:前 3:右 6:後 9:左) の値[mm]
+void printWalls(const char* label, const std::array<bool, 4>& walls)
+{
+    const uint16_t* d = upperVL53s.distance_data; // readWall() で最後に受信した値
+    DBG("%s walls F=%d R=%d B=%d L=%d  vl53 0=%u 3=%u 6=%u 9=%u", label,
+        walls[0], walls[1], walls[2], walls[3], d[0], d[3], d[6], d[9]);
+}
+
+// ステート変化をloop()の先頭で表示する
+void printStateChange()
+{
+    static bool first = true;
+    static RobotState lastState = RobotState::WaitingStart;
+    if (first || lastState != robotState)
+    {
+        DBG("STATE %s -> %s", first ? "-" : stateName(lastState), stateName(robotState));
+        first = false;
+        lastState = robotState;
+    }
+}
 
 rcj_maze::Direction directionFromDelta(int dx, int dy)
 {
@@ -147,6 +231,8 @@ bool waitWithStartButton(tb67::ControlMotors& motors, unsigned long durationMs)
 
 void pauseForLoP(RobotState resumeState)
 {
+    DBG("PAUSE (LoP / 中断) resume=%s", stateName(resumeState));
+    printPose("PAUSE");
     controlMotors.stopRobot();
     resumeStateAfterPause = resumeState;
     robotState = RobotState::Paused;
@@ -219,6 +305,9 @@ void updatePoseAfterSlope(bool updateMapAfterTraversal)
 {
     const int startFloor = robotPose.floor;
 
+    DBG("SLOPE passed: direction=%s (ジャイロ判定)",
+        controlRobot.lastSlopeDirection() > 0 ? "up" : (controlRobot.lastSlopeDirection() < 0 ? "down" : "unknown"));
+
     // 坂セルを経由して反対側フロアの通常セルへ移動する。
     mazeMapper.moveForward(robotPose.x, robotPose.y, robotPose.dir);
     if (updateMapAfterTraversal)
@@ -233,8 +322,10 @@ void updatePoseAfterSlope(bool updateMapAfterTraversal)
     if (updateMapAfterTraversal)
     {
         checkWalls.readWall(nowWall);
+        printWalls("after slope", nowWall);
         mazeMapper.updateMap(robotPose.floor, robotPose.x, robotPose.y, robotPose.dir, nowWall);
     }
+    printPose("after slope");
 }
 
 // 地図上で分かっている坂を、手前（または上端）から通過した先の通常セルまで移動する。
@@ -247,6 +338,7 @@ bool traverseSlope(RobotState resumeState, bool updateMapAfterTraversal)
         return false;
     }
 
+    printPose("traverse known slope from");
     // 上り・下りはジャイロの傾きで判断する
     const bool completed = controlRobot.traverseSlope(defaultSpeed, sensorManager.readYaw());
     if (pauseAfterMotionIfInterrupted(completed, resumeState))
@@ -262,6 +354,7 @@ bool traverseSlope(RobotState resumeState, bool updateMapAfterTraversal)
 // 地図上の階は 0 と 1 の2つなので、今いる階から見て反対側の階へつながる坂として登録する。
 void registerDetectedSlope()
 {
+    printPose("register new slope from");
     if (robotPose.floor == 0)
     {
         mazeMapper.markRampUp(robotPose.floor, robotPose.x, robotPose.y, robotPose.dir);
@@ -279,8 +372,12 @@ bool moveForward()
         robotPose.floor, robotPose.x, robotPose.y);
     const rcj_maze::FloorPosition goalPosition(
         searchResult.nextFloor, searchResult.nextX, searchResult.nextY);
+    DBG("MOVE start (%d,%d,f%d) -> (%d,%d,f%d) dir=%s",
+        startPosition.x, startPosition.y, startPosition.floor,
+        goalPosition.x, goalPosition.y, goalPosition.floor, dirName(searchResult.absoluteDirection));
     moveResult = controlRobot.moveForwardOneBlock(
         defaultSpeed, sensorManager.readYaw(), startPosition, goalPosition, mazeMapper);
+    DBG("MOVE result=%d (%s)", moveResult, moveResultName(moveResult));
     if (moveResult < 0)
     {
         pauseForLoP(robotState);
@@ -364,6 +461,7 @@ bool moveForward()
         return false;
     }
 
+    printPose("MOVE end");
     return true;
 }
 
@@ -374,6 +472,8 @@ bool returnFromLoP()
     robotPose.floor = lastCheckpointPose.floor;
 
     float yaw = sensorManager.readYaw();
+    DBG("RESUME from last checkpoint floor=%d (%d,%d) yaw=%.1f",
+        robotPose.floor, robotPose.x, robotPose.y, yaw);
     if (315 <= yaw || 45 > yaw)
     {
         if (45 > yaw)
@@ -425,7 +525,9 @@ bool returnFromLoP()
 
 void setup()
 {
+    Serial.begin(115200); // デバッグ用USBシリアル
     upperVL53s.begin(115200); // rp2040 (Serial8、受信バッファを増やして開始)
+    delay(5500);
     Serial3.begin(115200); // UnitV 1
     Serial5.begin(115200); // UnitV 2
     Serial3.setTimeout(1000); // readStringUntil()の待機上限
@@ -454,18 +556,24 @@ void setup()
 
 
     robotState = RobotState::WaitingStart;
+    DBG("setup done. スタートボタンでセンサー初期化と探索開始");
 }
 
 
 void loop()
 {
+    printStateChange();
+
     if (buttons::consumeStartButtonInterrupt())
     {
+        DBG("START button pressed (state=%s)", stateName(robotState));
         if (isFirstBoot) // 起動後最初のスタートのみ
         {
             // センサーキャリブレーションなど
+            DBG("sensor setup...");
             if (!sensorManager.setupSensors(ledPinTCS))
             {
+                DBG("ERROR sensor setup failed. もう一度スタートボタンを押す");
                 controlMotors.stopRobot();
                 robotState = RobotState::WaitingStart;
                 buttons::takeConsumedStartButtonInterrupt();
@@ -486,6 +594,7 @@ void loop()
             lastCheckpointPose.dir = robotPose.dir;
 
             checkWalls.readWall(nowWall);
+            printWalls("start", nowWall);
             mazeMapper.updateMap(robotPose.floor, robotPose.x, robotPose.y, robotPose.dir, nowWall); // (0, 0)を作成
 
             isFirstBoot = false;
@@ -527,7 +636,12 @@ void loop()
         // 次行くとこ決める、今の壁情報はここでupdateMap()される
         // 坂は事前に距離センサーで推定せず、前進中にジャイロで検出して地図に登録する
         // （moveForwardOneBlock が kMoveResultSlope を返す）。
+        printPose("SEARCH");
+        printWalls("SEARCH", nowWall);
         searchResult = _searchApp.decideNextMove(mazeMapper, robotPose, nowWall, false);
+        DBG("SEARCH decide move=%s next=(%d,%d,f%d) dir=%s slope=%d finished=%d",
+            moveName(searchResult.move), searchResult.nextX, searchResult.nextY, searchResult.nextFloor,
+            dirName(searchResult.absoluteDirection), searchResult.nextIsSlope, searchResult.finished);
         
         if (!searchResult.finished)
         {
@@ -581,6 +695,8 @@ void loop()
     case RobotState::Returning: // decideNextMoveでFinishedになったら座標(0, 0)に帰る
     {
         returnCoordinate = _searchApp.decideReturnWay(mazeMapper, robotPose, returnWay);
+        DBG("RETURN path length=%u", static_cast<unsigned>(returnCoordinate.size()));
+        printPose("RETURN");
 
         if (returnCoordinate.size() < 2)
         {
@@ -596,6 +712,9 @@ void loop()
         {
             const rcj_maze::FloorPosition &from = returnCoordinate[i];
             const rcj_maze::FloorPosition &next = returnCoordinate[i + 1];
+            DBG("RETURN step %u/%u (%d,%d,f%d) -> (%d,%d,f%d)",
+                static_cast<unsigned>(i + 1), static_cast<unsigned>(returnCoordinate.size() - 1),
+                from.x, from.y, from.floor, next.x, next.y, next.floor);
             const rcj_maze::Cell *currentCell = mazeMapper.findCell(from.floor, from.x, from.y);
             const rcj_maze::Cell *nextCell = mazeMapper.findCell(next.floor, next.x, next.y);
 
@@ -631,6 +750,7 @@ void loop()
                     robotPose.x != returnCoordinate[i + 2].x ||
                     robotPose.y != returnCoordinate[i + 2].y)
                 {
+                    DBG("ERROR RETURN: 坂を通過した後の位置が予定経路と合わない");
                     controlMotors.stopRobot();
                     pauseForLoP(RobotState::Returning);
                     returnInterrupted = true;
@@ -644,6 +764,7 @@ void loop()
             // フロアをまたぐ辺は必ず有効なフロアリンクでなければならない。
             if (from.floor != next.floor)
             {
+                DBG("ERROR RETURN: フロアリンクでない場所で階が変わる経路");
                 controlMotors.stopRobot();
                 pauseForLoP(RobotState::Returning);
                 returnInterrupted = true;
@@ -670,6 +791,7 @@ void loop()
                  moveResult == controlrobot::ControlRobot::kMoveResultSlope))
             {
                 // 予定経路の1マス先まで進んだので、現在位置から帰還経路を作り直す。
+                DBG("RETURN replan (%s)", moveResultName(moveResult));
                 returnPathNeedsReplan = true;
                 break;
             }
@@ -685,6 +807,7 @@ void loop()
             break;
         }
 
+        DBG("RETURN reached start tile. finished!");
         // LED点滅
         controlMotors.brakeRobot();
 

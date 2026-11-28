@@ -2,6 +2,8 @@
 
 #include <limits.h>
 
+#include "Debug.hpp"
+
 namespace uppervl53s
 {
 uint8_t UpperVL53s::crc8(const uint8_t* data, size_t len)
@@ -111,6 +113,7 @@ void UpperVL53s::getVL53s(uint16_t _distance_data[NUM_SENSORS], ReceiveDebugInfo
     {
         // 長時間読まなかったため受信バッファが溢れ、古いデータしか残っていない。
         // 捨てて、次に届く新しいフレームを待つ。
+        DBG("VL53 RX buffer overflow (%d bytes), drop old data", _rp2040.available());
         while (_rp2040.available())
         {
             _rp2040.read();
@@ -139,5 +142,12 @@ void UpperVL53s::getVL53s(uint16_t _distance_data[NUM_SENSORS], ReceiveDebugInfo
     }
 
     memcpy(_distance_data, distance_data, PAYLOAD_SIZE);
+
+    // RP2040からのフレームが途絶えていたら警告（1秒に1回まで）
+    if (!_hasFrame || millis() - _lastFrameMs > 500)
+    {
+        DBG_EVERY(1000, "WARN VL53 no frame from RP2040 for %ld ms",
+                  _hasFrame ? static_cast<long>(millis() - _lastFrameMs) : -1L);
+    }
 }
 }

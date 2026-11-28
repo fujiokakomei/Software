@@ -1,4 +1,5 @@
 #include "Sensors.hpp"
+#include "Debug.hpp"
 
 #include <Wire.h>
 #include <Adafruit_TCS34725.h>
@@ -84,6 +85,7 @@ bool SensorManager::setupSensors(int led_pin)
     _tcsReady = tcs.begin(TCS34725_ADDRESS, &Wire);
     if (!_tcsReady)
     {
+        DBG("ERROR SENSOR TCS34725 not found on Wire (SDA/SCL)");
         digitalWrite(led_pin, LOW);
         return false;
     }
@@ -97,14 +99,17 @@ bool SensorManager::setupSensors(int led_pin)
     }
     if (!_bnoReady)
     {
+        DBG("ERROR SENSOR BNO055 not found on Wire1 nor Wire");
         digitalWrite(led_pin, LOW);
         return false;
     }
+    DBG("SENSOR TCS34725 ok, BNO055 ok on %s", bno == &bnoOnWire1 ? "Wire1 (SDA1/SCL1)" : "Wire (SDA/SCL)");
     bno->setExtCrystalUse(true); //外部クロック有効
     bno->setMode(adafruit_bno055_opmode_t::OPERATION_MODE_IMUPLUS); //加速度センサーとジャイロセンサーのみ有効
     delay(100); //センサーが安定するまで待機
     if (!waitForGyroCalibration())
     {
+        DBG("ERROR SENSOR gyro calibration timeout (%lu ms). 機体を動かさずに置く", kGyroCalibrationTimeoutMs);
         digitalWrite(led_pin, LOW);
         return false;
     }
@@ -114,6 +119,7 @@ bool SensorManager::setupSensors(int led_pin)
     yawoffset = event.orientation.x; //現在のyawをオフセット値として保存
     rolloffset = event.orientation.y; //現在のrollをオフセット値として保存
     pitchoffset = event.orientation.z; //現在のpitchをオフセット値として保存
+    DBG("SENSOR ready. offset yaw=%.1f roll=%.1f pitch=%.1f", yawoffset, rolloffset, pitchoffset);
     _isReady = true;
     return true;
 }
@@ -136,6 +142,20 @@ void SensorManager::readColor(uint16_t &r, uint16_t &g, uint16_t &b, uint16_t &c
     tcs.getRawData(&r, &g, &b, &c);
     colorTemp = tcs.calculateColorTemperature_dn40(r, g, b, c);
     lux = tcs.calculateLux(r, g, b);
+    _lastR = r;
+    _lastG = g;
+    _lastB = b;
+    _lastC = c;
+    _lastLux = lux;
+}
+
+void SensorManager::lastColor(uint16_t &r, uint16_t &g, uint16_t &b, uint16_t &c, float &lux) const
+{
+    r = _lastR;
+    g = _lastG;
+    b = _lastB;
+    c = _lastC;
+    lux = _lastLux;
 }
 
 ColorTile detectColorTile(SensorManager& sensors)
@@ -201,8 +221,10 @@ bool SensorManager::waitForGyroCalibration()
         bno->getCalibration(&sysCal, &gyroCal, &accelCal, &magCal);
         if (gyroCal == 3) // ジャイロセンサーのキャリブレーションが完了しているか
         {
+            DBG("SENSOR gyro calibrated (%lu ms)", millis() - startTime);
             return true;
         }
+        DBG_EVERY(1000, "SENSOR waiting gyro calibration... gyro=%u accel=%u sys=%u", gyroCal, accelCal, sysCal);
         delay(100);
     }
     return false;
