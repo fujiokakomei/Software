@@ -129,6 +129,10 @@ private:
     slope::SlopeDetector _slopeDetector;
     int _lastSlopeDirection = 0;
 
+    // 1マス前進して止まった後、行き過ぎ・足りない分を前方距離センサーで前後に調整する。
+    // スタートボタンで中断されたときだけ false。
+    bool adjustPositionAfterForward(float goalDistanceMm, float targetYaw);
+
     // 前方距離センサーの値を基準に、指定したタイル中心まで前進する。
     bool moveForwardToFrontDistance(int speed, float targetDistanceMm, float targetYaw);
     void beginIntermediateTileWallRecording(

@@ -44,6 +44,16 @@ constexpr unsigned long kSlopeResolveTimeoutMs = 1500;
 // 通常の前進速度は main.cpp の defaultSpeed。
 constexpr int kTiltedSpeed = 220;
 constexpr unsigned long kGyroCorrectionTimeoutMs = 5000;
+// 1マス前進後の位置調整
+constexpr unsigned long kAdjustSettleMs = 150;     // ブレーキ後、止まりきるまで待つ時間
+constexpr float kAdjustToleranceMm = 10.0f;        // 目標からこの範囲に入ったら調整終了
+constexpr int kAdjustSpeed = 130;                  // 調整時の速度(PWM)。130未満だとモーターが動かない
+constexpr unsigned long kAdjustTimeoutMs = 1500;
+// 前方の壁がこの距離より近いときは、壁を基準にタイル中心の距離(kFrontDistanceMm + n*300)へ合わせる
+constexpr float kAdjustWallReferenceMaxMm = 750.0f;
+// 壁基準の目標が走行開始時の目標とこれ以上ずれるときは壁基準を使わない（読み間違い対策）
+constexpr float kAdjustMaxWallReferenceGapMm = 100.0f;
+constexpr float kMaxValidFrontDistanceMm = 2000.0f; // これ以上は範囲外・データなし
 constexpr unsigned long kCameraResponseTimeoutMs = 3000;
 constexpr int kMotionTimeoutResult = -1;
 // 上部VL53PID
@@ -58,9 +68,9 @@ constexpr int R_SENSOR = 3;
 constexpr int DL_SENSOR = 10;
 constexpr int L_SENSOR = 9;
 // 左右障害物検知距離閾値&回避用定数とか
-constexpr float kObstacleThresholdMm = 90.0f;
+constexpr float kObstacleThresholdMm = 100.0f;
 constexpr float kTurningAngle = 20.0f;
-constexpr int kMovingSpeed = 50;
+constexpr int kMovingSpeed = 130;
 constexpr int kMovingMs = 1000; //ミリ秒
 constexpr float kObstacleSecondTileThresholdMm = 60.0f; //これ以上進んでたら2マス前方に復帰する
 constexpr float kWalledTileDistanceMm = 280.0f;
@@ -631,6 +641,105 @@ void ControlRobot::clearIntermediateTileWallRecording()
     _intermediateTileMapper = nullptr;
 }
 
+bool ControlRobot::adjustPositionAfterForward(float goalDistanceMm, float targetYaw)
+{
+    // まず止まる（走りながら止めると惰性で行き過ぎるため）
+    _motors.brakeRobot();
+    if (waitWithStartButton(_motors, kAdjustSettleMs))
+    {
+        return false;
+    }
+    _motors.stopRobot();
+
+    _vl53s.getVL53s(distance_data);
+    float nowDistance = distance_data[0];
+    if (nowDistance <= 0.0f || nowDistance >= kMaxValidFrontDistanceMm)
+    {
+        DBG("FWD adjust skipped: front=%.0f is invalid", nowDistance);
+        return true;
+    }
+
+    float targetDistance = goalDistanceMm;
+    const char* reference = "start";
+    if (nowDistance < kAdjustWallReferenceMaxMm)
+    {
+        // 前の壁が近ければ、壁からの距離でタイル中心に合わせる方が正確
+        const float tiles = max(0.0f, roundf((nowDistance - kFrontDistanceMm) / kTileDistanceMm));
+        const float wallTarget = kFrontDistanceMm + tiles * kTileDistanceMm;
+        if (fabsf(wallTarget - goalDistanceMm) <= kAdjustMaxWallReferenceGapMm)
+        {
+            targetDistance = wallTarget;
+            reference = "wall";
+        }
+    }
+
+    // error > 0: 足りない（前進） / error < 0: 行き過ぎ（後退）
+    float error = nowDistance - targetDistance;
+    DBG("FWD adjust start front=%.0f target=%.0f (%s) error=%.0f",
+        nowDistance, targetDistance, reference, error);
+    const unsigned long startTime = millis();
+    int lastDirection = 0;
+    while (fabsf(error) > kAdjustToleranceMm)
+    {
+        if (stopIfStartButtonInterrupted(_motors))
+        {
+            return false;
+        }
+        if (millis() - startTime >= kAdjustTimeoutMs)
+        {
+            _motors.stopRobot();
+            DBG("WARN FWD adjust timeout front=%.0f target=%.0f", nowDistance, targetDistance);
+            return true;
+        }
+
+        const int direction = error > 0.0f ? 1 : -1;
+        if (lastDirection != 0 && direction != lastDirection)
+        {
+            // 調整でも行き過ぎたら、一度止まってから逆に動く
+            _motors.brakeRobot();
+            if (waitWithStartButton(_motors, kAdjustSettleMs))
+            {
+                return false;
+            }
+        }
+        lastDirection = direction;
+
+        const float operation = PID(targetYaw);
+        const int leftSpeed = clampMotorSpeed(kAdjustSpeed - operation);
+        const int rightSpeed = clampMotorSpeed(kAdjustSpeed + operation);
+        if (direction > 0)
+        {
+            _motors.moveLeftSide(leftSpeed);
+            _motors.moveRightSide(rightSpeed);
+        }
+        else
+        {
+            _motors.moveRightSide(-leftSpeed);
+            _motors.moveLeftSide(-rightSpeed);
+        }
+
+        _vl53s.getVL53s(distance_data);
+        nowDistance = distance_data[0];
+        if (nowDistance <= 0.0f || nowDistance >= kMaxValidFrontDistanceMm)
+        {
+            _motors.stopRobot();
+            DBG("WARN FWD adjust aborted: front=%.0f is invalid", nowDistance);
+            return true;
+        }
+        error = nowDistance - targetDistance;
+    }
+
+    _motors.brakeRobot();
+    if (waitWithStartButton(_motors, kAdjustSettleMs))
+    {
+        return false;
+    }
+    _motors.stopRobot();
+    DBG("FWD adjust done front=%.0f target=%.0f (%lu ms)",
+        nowDistance, targetDistance, millis() - startTime);
+    return true;
+}
+
 bool ControlRobot::moveForwardToFrontDistance(int speed, float targetDistanceMm, float targetYaw)
 {
     _vl53s.getVL53s(distance_data);
@@ -1075,7 +1184,13 @@ int ControlRobot::moveForwardOneBlock(
         clearIntermediateTileWallRecording();
         return kMoveResultObstacleSecondNextTile;
     }
-    _motors.stopRobot();
+    // 止まってから、行き過ぎ・足りない分を調整する
+    if (!adjustPositionAfterForward(goalDistance, start_yaw))
+    {
+        return 0;
+    }
+    _vl53s.getVL53s(distance_data);
+    nowDistance = distance_data[0];
     DBG("FWD end front=%.0f checkpoint=%d blue=%d (%lu ms)",
         nowDistance, detectedCheckpoint, detectedBlueTile, millis() - motionStartTime);
     if (detectedCheckpoint)
@@ -1235,7 +1350,7 @@ bool ControlRobot::traverseSlope(int speed, float start_yaw)
 
 bool ControlRobot::correctGyroYaw(int nowDir)
 {
-    _motors.moveBackward(100);
+    _motors.moveBackward(kMovingSpeed);
     if (waitWithStartButton(_motors, 5000))
     {
         return false;
@@ -1268,8 +1383,8 @@ bool ControlRobot::correctGyroYaw(int nowDir)
         }
 
         const float operation = PID(yaw);
-        const int leftSpeed = clampMotorSpeed(100 - operation);
-        const int rightSpeed = clampMotorSpeed(100 + operation);
+        const int leftSpeed = clampMotorSpeed(kMovingSpeed - operation);
+        const int rightSpeed = clampMotorSpeed(kMovingSpeed + operation);
 
         _motors.moveLeftSide(leftSpeed);
         _motors.moveRightSide(rightSpeed);
