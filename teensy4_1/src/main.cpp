@@ -675,7 +675,7 @@ void loop()
             }
             else if (searchResult.move == searchapp::SearchMove::Right)
             {
-                if (turnOrPause(90, RobotState::Searching))
+                if (turnOrPause(85, RobotState::Searching))
                 {
                     break;
                 }
@@ -683,7 +683,7 @@ void loop()
             }
             else if (searchResult.move == searchapp::SearchMove::Left)
             {
-                if (turnOrPause(-90, RobotState::Searching))
+                if (turnOrPause(-85, RobotState::Searching))
                 {
                     break;
                 }
@@ -691,7 +691,7 @@ void loop()
             }
             else if (searchResult.move == searchapp::SearchMove::Back)
             {
-                if (turnOrPause(180, RobotState::Searching))
+                if (turnOrPause(175, RobotState::Searching))
                 {
                     break;
                 }

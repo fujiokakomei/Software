@@ -47,7 +47,7 @@ constexpr unsigned long kGyroCorrectionTimeoutMs = 5000;
 // 1マス前進後の位置調整
 constexpr unsigned long kAdjustSettleMs = 150;     // ブレーキ後、止まりきるまで待つ時間
 constexpr float kAdjustToleranceMm = 10.0f;        // 目標からこの範囲に入ったら調整終了
-constexpr int kAdjustSpeed = 130;                  // 調整時の速度(PWM)。130未満だとモーターが動かない
+constexpr int kAdjustSpeed = 140;                  // 調整時の速度(PWM)。130未満だとモーターが動かない
 constexpr unsigned long kAdjustTimeoutMs = 1500;
 // 前方の壁がこの距離より近いときは、壁を基準にタイル中心の距離(kFrontDistanceMm + n*300)へ合わせる
 constexpr float kAdjustWallReferenceMaxMm = 750.0f;
@@ -70,7 +70,7 @@ constexpr int L_SENSOR = 9;
 // 左右障害物検知距離閾値&回避用定数とか
 constexpr float kObstacleThresholdMm = 100.0f;
 constexpr float kTurningAngle = 20.0f;
-constexpr int kMovingSpeed = 130;
+constexpr int kMovingSpeed = 140;
 constexpr int kMovingMs = 1000; //ミリ秒
 constexpr float kObstacleSecondTileThresholdMm = 60.0f; //これ以上進んでたら2マス前方に復帰する
 constexpr float kWalledTileDistanceMm = 280.0f;
