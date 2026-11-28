@@ -3,10 +3,18 @@
 namespace rescuekits
 {
 
-void RescueKitManager::setupRescueKits(int ServoPin, int ledPin, int rescuekits)
+namespace
+{
+constexpr unsigned long kDeployHoldMs = 500;  // 投下位置で待つ時間
+constexpr unsigned long kReturnWaitMs = 500;  // 普段の角度に戻るまで待つ時間
+}
+
+void RescueKitManager::setupRescueKits(int ServoPin, int ledPin, int rescuekits, int idleAngle, int deployAngle)
 {
     this->ServoPin = ServoPin;
     this->ledPin = ledPin;
+    this->idleAngle = idleAngle;
+    this->deployAngle = deployAngle;
 
     this->remainingKits = rescuekits;
 
@@ -15,17 +23,17 @@ void RescueKitManager::setupRescueKits(int ServoPin, int ledPin, int rescuekits)
 
     //サーボモーターの初期化
     servo.attach(ServoPin);
-    servo.write(0); //右のサーボモーターを初期位置に設定
+    servo.write(idleAngle); //普段の角度に設定
 }
 
 void RescueKitManager::deployRescueKit(int number, bool is_led) //残りキットはmain.cppで確認
 {
     for (int i = 0; i < number; i++)
     {
-        servo.write(70); //右のサーボモーターを展開位置に設定
-        delay(500);         //展開動作の完了を待つ
-        servo.write(0); //右のサーボモーターを元の位置に戻す
-        delay(500);
+        servo.write(deployAngle); //投下時の角度にする
+        delay(kDeployHoldMs);     //投下動作の完了を待つ
+        servo.write(idleAngle);   //普段の角度に戻す
+        delay(kReturnWaitMs);
         remainingKits--;
     }
 

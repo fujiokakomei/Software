@@ -74,7 +74,10 @@ void printDistances(
         Serial.print(':');
         Serial.print(distances[i]);
     }
-    Serial.println();
+    // 最後に正しいフレームを受け取ってからの時間。大きくなり続けたらRP2040から届いていない。
+    Serial.print(F("  frame age="));
+    Serial.print(upperVL53s.lastFrameAgeMs());
+    Serial.println(F(" ms"));
 
     /*
     if (!hasPreviousDistances)
@@ -120,7 +123,7 @@ void printDistances(
 void setup()
 {
     Serial.begin(kSerialBaud);
-    Serial8.begin(kSerialBaud); // RP2040 からの上部 VL53 データ
+    upperVL53s.begin(kSerialBaud); // RP2040 からの上部 VL53 データ (Serial8)
 
     const uint32_t waitStart = millis();
     while (!Serial && millis() - waitStart < kUsbSerialWaitMs)

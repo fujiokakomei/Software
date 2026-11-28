@@ -1,5 +1,7 @@
 #include "upperVL53.hpp"
 
+#include <limits.h>
+
 namespace uppervl53s
 {
 uint8_t UpperVL53s::crc8(const uint8_t* data, size_t len)
@@ -86,6 +88,17 @@ bool UpperVL53s::receiveDistance(uint16_t out[NUM_SENSORS], ReceiveDebugInfo* de
     return false;
 }
 
+void UpperVL53s::begin(uint32_t baud)
+{
+    _rp2040.begin(baud);
+    _rp2040.addMemoryForRead(_extraRxBuffer, sizeof(_extraRxBuffer));
+}
+
+unsigned long UpperVL53s::lastFrameAgeMs() const
+{
+    return _hasFrame ? millis() - _lastFrameMs : ULONG_MAX;
+}
+
 void UpperVL53s::getVL53s(uint16_t _distance_data[NUM_SENSORS], ReceiveDebugInfo* debugInfo)
 {
     uint16_t received[NUM_SENSORS];
@@ -94,10 +107,35 @@ void UpperVL53s::getVL53s(uint16_t _distance_data[NUM_SENSORS], ReceiveDebugInfo
         *debugInfo = {};
     }
 
+    if (static_cast<size_t>(_rp2040.available()) >= STALE_BUFFER_BYTES)
+    {
+        // 長時間読まなかったため受信バッファが溢れ、古いデータしか残っていない。
+        // 捨てて、次に届く新しいフレームを待つ。
+        while (_rp2040.available())
+        {
+            _rp2040.read();
+        }
+        _receiveState = ReceiveState::WaitForV;
+
+        const unsigned long waitStart = millis();
+        while (millis() - waitStart < FRESH_FRAME_TIMEOUT_MS)
+        {
+            if (receiveDistance(received, debugInfo))
+            {
+                memcpy(distance_data, received, PAYLOAD_SIZE);
+                _lastFrameMs = millis();
+                _hasFrame = true;
+                break;
+            }
+        }
+    }
+
     // 到着済みの完全なフレームをすべて処理し、最後に検証できた値を保持する。
     while (receiveDistance(received, debugInfo))
     {
         memcpy(distance_data, received, PAYLOAD_SIZE);
+        _lastFrameMs = millis();
+        _hasFrame = true;
     }
 
     memcpy(_distance_data, distance_data, PAYLOAD_SIZE);

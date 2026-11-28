@@ -45,8 +45,13 @@ int m4_2 = 7;
 tb67::ControlMotors controlMotors;
 
 
-int rightKitPin = 23;
-int leftKitPin = 22;
+int rightKitPin = 22;
+int leftKitPin = 23;
+// 投下機構のサーボ角度（普段 → 投下時に動かして少し待ち、普段に戻す）
+int rightKitIdleAngle = 135;
+int rightKitDeployAngle = 180;
+int leftKitIdleAngle = 45;
+int leftKitDeployAngle = 0;
 int ledPin = 29;
 int rescueKitQuantity = 4;
 rescuekits::RescueKitManager rightKit;
@@ -420,7 +425,7 @@ bool returnFromLoP()
 
 void setup()
 {
-    Serial8.begin(115200); // rp2040
+    upperVL53s.begin(115200); // rp2040 (Serial8、受信バッファを増やして開始)
     Serial3.begin(115200); // UnitV 1
     Serial5.begin(115200); // UnitV 2
     Serial3.setTimeout(1000); // readStringUntil()の待機上限
@@ -444,8 +449,8 @@ void setup()
     );
 
 
-    rightKit.setupRescueKits(rightKitPin, ledPin, rescueKitQuantity);
-    leftKit.setupRescueKits(leftKitPin, ledPin, rescueKitQuantity);
+    rightKit.setupRescueKits(rightKitPin, ledPin, rescueKitQuantity, rightKitIdleAngle, rightKitDeployAngle);
+    leftKit.setupRescueKits(leftKitPin, ledPin, rescueKitQuantity, leftKitIdleAngle, leftKitDeployAngle);
 
 
     robotState = RobotState::WaitingStart;
